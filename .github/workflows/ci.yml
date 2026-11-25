@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format-and-interface:
+    name: Format & Interface Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install MoonBit toolchain
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Print MoonBit version
+        run: moon version
+
+      - name: Check formatting
+        run: moon fmt --check
+
+      - name: Verify generated .mbti interfaces
+        run: |
+          moon info
+          git diff --exit-code -- '*.mbti'
+
+  test-matrix:
+    name: Test (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wasm, wasm-gc, js, native]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install MoonBit toolchain
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Setup Node.js (for JS target)
+        if: matrix.target == 'js'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify C compiler (for Native target)
+        if: matrix.target == 'native'
+        run: gcc --version
+
+      - name: Run full test suite (zero-warning -d)
+        run: moon test --target ${{ matrix.target }} -d
+
+  cli-smoke:
+    name: CLI Selftest (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wasm-gc, js, native]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install MoonBit toolchain
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Setup Node.js (for JS target)
+        if: matrix.target == 'js'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify C compiler (for Native target)
+        if: matrix.target == 'native'
+        run: gcc --version
+
+      - name: Run built-in GB/T 38635-2020 CLI selftest
+        run: moon run cmd/main --target ${{ matrix.target }}
+
+  bench-smoke:
+    name: Benchmark Smoke (native)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install MoonBit toolchain
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Verify C compiler
+        run: gcc --version
+
+      - name: Run release benchmark suite
+        run: moon bench --release --target native

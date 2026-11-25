@@ -1,0 +1,15 @@
+import {
+  "CoolrfulDARkness/moonsm9/sm3",
+  "CoolrfulDARkness/moonsm9/sm4",
+  "CoolrfulDARkness/moonsm9/field",
+  "CoolrfulDARkness/moonsm9/ec",
+  "CoolrfulDARkness/moonsm9/pairing",
+  "CoolrfulDARkness/moonsm9/kgc",
+  "CoolrfulDARkness/moonsm9/sign",
+  "CoolrfulDARkness/moonsm9/keyex",
+  "CoolrfulDARkness/moonsm9/enc",
+}
+
+import {
+  "moonbitlang/core/bench",
+} for "test"

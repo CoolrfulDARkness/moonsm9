@@ -1,0 +1,21 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "CoolrfulDARkness/moonsm9/sm4"
+
+// Values
+pub fn decrypt_ecb_pkcs7(BytesView, BytesView) -> Bytes?
+
+pub fn encrypt_ecb_pkcs7(BytesView, BytesView) -> Bytes?
+
+// Errors
+
+// Types and methods
+pub struct Sm4Key {
+  // private fields
+}
+pub fn Sm4Key::decrypt_block(Self, BytesView) -> Bytes?
+pub fn Sm4Key::encrypt_block(Self, BytesView) -> Bytes?
+pub fn Sm4Key::new(BytesView) -> Self?
+
+// Type aliases
+
+// Traits

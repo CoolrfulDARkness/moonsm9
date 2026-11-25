@@ -1,9 +1,13 @@
 ///|
+/// Maximum allowed KDF output length (16 MiB) to prevent OOM DoS.
+pub const MAX_KDF_LEN : Int32 = 16_777_216
+
+///|
 /// Output of the SM9 key exchange responder (User B, GB/T 38635.3-2020 §6.2).
 /// - `sk`: derived shared secret key `SK_B` of length `klen` bytes.
 /// - `s_b`: key confirmation hash `S_B` (tag `0x82`, 32 bytes) sent from B to A.
 /// - `s_2`: expected confirmation hash `S_2` (tag `0x83`, 32 bytes) used by B to verify `S_A` from A.
-#derive(Eq, Debug)
+#derive(Debug)
 pub struct ResponderResult {
   sk : Bytes
   s_b : Bytes
@@ -11,15 +15,51 @@ pub struct ResponderResult {
 }
 
 ///|
+/// Constant-time equality comparison across all byte fields of `ResponderResult`
+/// without short-circuiting.
+pub fn ResponderResult::ct_eq(
+  self : ResponderResult,
+  other : ResponderResult,
+) -> Bool {
+  let sk_eq = @field.ct_mask(@sm3.ct_eq_bytes(self.sk, other.sk))
+  let sb_eq = @field.ct_mask(@sm3.ct_eq_bytes(self.s_b, other.s_b))
+  let s2_eq = @field.ct_mask(@sm3.ct_eq_bytes(self.s_2, other.s_2))
+  (sk_eq & sb_eq & s2_eq) != 0UL
+}
+
+///|
+pub impl Eq for ResponderResult with fn equal(self, other) {
+  self.ct_eq(other)
+}
+
+///|
 /// Output of the SM9 key exchange initiator (User A, GB/T 38635.3-2020 §6.2).
 /// - `sk`: derived shared secret key `SK_A` of length `klen` bytes.
 /// - `s_a`: key confirmation hash `S_A` (tag `0x83`, 32 bytes) sent from A to B.
 /// - `s_1`: locally computed confirmation hash `S_1` (tag `0x82`, 32 bytes) matching `S_B` from B.
-#derive(Eq, Debug)
+#derive(Debug)
 pub struct InitiatorResult {
   sk : Bytes
   s_a : Bytes
   s_1 : Bytes
+}
+
+///|
+/// Constant-time equality comparison across all byte fields of `InitiatorResult`
+/// without short-circuiting.
+pub fn InitiatorResult::ct_eq(
+  self : InitiatorResult,
+  other : InitiatorResult,
+) -> Bool {
+  let sk_eq = @field.ct_mask(@sm3.ct_eq_bytes(self.sk, other.sk))
+  let sa_eq = @field.ct_mask(@sm3.ct_eq_bytes(self.s_a, other.s_a))
+  let s1_eq = @field.ct_mask(@sm3.ct_eq_bytes(self.s_1, other.s_1))
+  (sk_eq & sa_eq & s1_eq) != 0UL
+}
+
+///|
+pub impl Eq for InitiatorResult with fn equal(self, other) {
+  self.ct_eq(other)
 }
 
 ///|
@@ -186,8 +226,8 @@ pub fn responder_exchange(
   r_b_point : @ec.G1Affine,
   klen : Int32,
 ) -> Result[ResponderResult, String] {
-  if klen <= 0 {
-    return Err("klen must be positive")
+  if klen <= 0 || klen > MAX_KDF_LEN {
+    return Err("klen must be in [1, MAX_KDF_LEN]")
   }
   if r_b.is_zero() {
     return Err("ephemeral scalar r_b must be non-zero")
@@ -255,8 +295,8 @@ pub fn initiator_exchange(
   klen : Int32,
   peer_s_b? : BytesView,
 ) -> Result[InitiatorResult, String] {
-  if klen <= 0 {
-    return Err("klen must be positive")
+  if klen <= 0 || klen > MAX_KDF_LEN {
+    return Err("klen must be in [1, MAX_KDF_LEN]")
   }
   if r_a.is_zero() {
     return Err("ephemeral scalar r_a must be non-zero")

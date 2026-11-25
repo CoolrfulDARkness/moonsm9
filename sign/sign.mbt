@@ -177,6 +177,21 @@ fn derive_deterministic_r(
 }
 
 ///|
+/// Validates that a precomputed pairing element `g` is a non-trivial member of the
+/// cyclotomic subgroup `G_{Phi_6}(Fp2)` (`g != 0`, `g != 1`, `g^{p^6 + 1} == 1`, and
+/// `g^{p^4 - p^2 + 1} == 1`), rejecting `-1` and arbitrary non-cyclotomic `Fp12` elements.
+fn is_valid_precomputed_g(g : @field.Fp12) -> Bool {
+  if g.is_zero() || g.is_one() {
+    return false
+  }
+  if !g.conjugate().mul(g).is_one() {
+    return false
+  }
+  let fp2 = g.frobenius_p2()
+  fp2.frobenius_p2().mul(g).ct_eq(fp2)
+}
+
+///|
 /// Precomputes the pairing element `g = e(P_pub-s, P1) in GT` (GB/T 38635.2 §6.2 A1 / §7.2 B3).
 /// Reusing `g` across signatures and verifications eliminates one full pairing per operation.
 pub fn precompute_g(p_pub_s : @ec.G2Affine) -> @field.Fp12 {
@@ -196,7 +211,7 @@ pub fn sign_with_r_precomputed(
   msg : BytesView,
   r : @field.Fn,
 ) -> Result[Signature, String] {
-  if g.is_zero() || g.is_one() {
+  if !is_valid_precomputed_g(g) {
     return Err("invalid precomputed pairing g")
   }
   if ds.is_infinity() || !ds.is_on_curve() {
@@ -283,9 +298,9 @@ pub fn sign_deterministic(
 }
 
 ///|
-/// Verifies an SM9 signature `(h, S)` against `id` and `msg` using a precomputed
-/// `g = e(P_pub-s, P1)` (GB/T 38635.2 §7.2).
-pub fn verify_precomputed(
+/// Internal signature verification assuming `p_pub_s` has already passed full
+/// G2 curve and prime-order subgroup validation.
+fn verify_unchecked_pub(
   p_pub_s : @ec.G2Affine,
   g : @field.Fp12,
   id : BytesView,
@@ -293,12 +308,7 @@ pub fn verify_precomputed(
   sig : Signature,
   hid~ : Byte = b'\x01',
 ) -> Bool {
-  if p_pub_s.is_infinity() ||
-    !p_pub_s.is_on_curve() ||
-    !p_pub_s.is_in_subgroup() {
-    return false
-  }
-  if g.is_zero() || g.is_one() {
+  if !is_valid_precomputed_g(g) {
     return false
   }
   // B1-B2: check h in [1, N - 1] and S in G1 \ {O}
@@ -326,6 +336,25 @@ pub fn verify_precomputed(
 }
 
 ///|
+/// Verifies an SM9 signature `(h, S)` against `id` and `msg` using a precomputed
+/// `g = e(P_pub-s, P1)` (GB/T 38635.2 §7.2).
+pub fn verify_precomputed(
+  p_pub_s : @ec.G2Affine,
+  g : @field.Fp12,
+  id : BytesView,
+  msg : BytesView,
+  sig : Signature,
+  hid~ : Byte = b'\x01',
+) -> Bool {
+  if p_pub_s.is_infinity() ||
+    !p_pub_s.is_on_curve() ||
+    !p_pub_s.is_in_subgroup() {
+    return false
+  }
+  verify_unchecked_pub(p_pub_s, g, id, msg, sig, hid~)
+}
+
+///|
 /// Verifies an SM9 signature `(h, S)` against master public key `p_pub_s`, signer identity `id`,
 /// and message `msg` (GB/T 38635.2 §7.2). Default `hid` is `0x01`.
 pub fn verify(
@@ -341,5 +370,5 @@ pub fn verify(
     return false
   }
   let g = precompute_g(p_pub_s)
-  verify_precomputed(p_pub_s, g, id, msg, sig, hid~)
+  verify_unchecked_pub(p_pub_s, g, id, msg, sig, hid~)
 }

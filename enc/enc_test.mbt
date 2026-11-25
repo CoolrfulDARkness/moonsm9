@@ -154,19 +154,21 @@ test "deterministic KEM round-trip and domain separation" {
   let p_pub_e = official_p_pub_e()
   let de_b = official_de_b()
   let id_b = b"Bob"
+  let seed_a = b"seed-A-0123456789abcdef012345678"
+  let seed_b = b"seed-B-0123456789abcdef012345678"
 
   let out1 = match
-    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 48, b"seed-A") {
+    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 48, seed_a) {
     Ok(v) => v
     Err(e) => fail("kem_encapsulate_deterministic failed: " + e)
   }
   let out2 = match
-    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 48, b"seed-A") {
+    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 48, seed_a) {
     Ok(v) => v
     Err(e) => fail("kem_encapsulate_deterministic repeat failed: " + e)
   }
   let out3 = match
-    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 48, b"seed-B") {
+    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 48, seed_b) {
     Ok(v) => v
     Err(e) => fail("kem_encapsulate_deterministic seed-B failed: " + e)
   }
@@ -198,6 +200,9 @@ test "boundary plaintexts: empty, 16-byte block boundary, and 137-byte long mess
   let empty = b""
   let block16 = b"0123456789abcdef"
   let long_msg = Bytes::makei(137, fn(i) { ((i * 37 + 11) & 0xFF).to_byte() })
+  let ent_empty = b"ent-empty-0123456789abcdef012345"
+  let ent_16 = b"ent-16----0123456789abcdef012345"
+  let ent_long = b"ent-long--0123456789abcdef012345"
 
   // Empty plaintext: KdfXor (96B) and Sm4EcbPkcs7 (112B)
   let ct_empty_xor = match
@@ -205,7 +210,7 @@ test "boundary plaintexts: empty, 16-byte block boundary, and 137-byte long mess
       p_pub_e,
       id_b,
       empty,
-      b"ent-empty",
+      ent_empty,
       mode=@enc.KdfXor,
     ) {
     Ok(c) => c
@@ -219,7 +224,7 @@ test "boundary plaintexts: empty, 16-byte block boundary, and 137-byte long mess
       p_pub_e,
       id_b,
       empty,
-      b"ent-empty",
+      ent_empty,
       mode=@enc.Sm4EcbPkcs7,
     ) {
     Ok(c) => c
@@ -237,7 +242,7 @@ test "boundary plaintexts: empty, 16-byte block boundary, and 137-byte long mess
       p_pub_e,
       id_b,
       block16,
-      b"ent-16",
+      ent_16,
       mode=@enc.Sm4EcbPkcs7,
     ) {
     Ok(c) => c
@@ -255,7 +260,7 @@ test "boundary plaintexts: empty, 16-byte block boundary, and 137-byte long mess
       p_pub_e,
       id_b,
       long_msg,
-      b"ent-long",
+      ent_long,
       mode=@enc.KdfXor,
     ) {
     Ok(c) => c
@@ -272,7 +277,7 @@ test "boundary plaintexts: empty, 16-byte block boundary, and 137-byte long mess
       p_pub_e,
       id_b,
       long_msg,
-      b"ent-long",
+      ent_long,
       mode=@enc.Sm4EcbPkcs7,
     ) {
     Ok(c) => c
@@ -446,12 +451,18 @@ test "adversarial tampering, truncation, off-curve C1, wrong key/ID, and mode mi
   )
   assert_true(@enc.kem_encapsulate_with_r(p_pub_e, id_b, 0, r) is Err(_))
   assert_true(@enc.kem_encapsulate_with_r(p_pub_e, id_b, -1, r) is Err(_))
+  let valid_ent = Bytes::make(32, b'\x42')
   assert_true(
-    @enc.kem_encapsulate_deterministic(@ec.G1Affine::identity(), id_b, 32, b"e")
+    @enc.kem_encapsulate_deterministic(
+      @ec.G1Affine::identity(),
+      id_b,
+      32,
+      valid_ent,
+    )
     is Err(_),
   )
   assert_true(
-    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 0, b"e") is Err(_),
+    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 0, valid_ent) is Err(_),
   )
   assert_true(
     @enc.kem_decapsulate(id_b, de_b, @ec.G1Affine::identity(), 32) is Err(_),
@@ -475,7 +486,154 @@ test "adversarial tampering, truncation, off-curve C1, wrong key/ID, and mode mi
     @enc.encrypt_with_r(p_pub_e, id_b, plaintext, @field.Fn::zero()) is Err(_),
   )
   assert_true(
-    @enc.encrypt_deterministic(@ec.G1Affine::identity(), id_b, plaintext, b"e")
+    @enc.encrypt_deterministic(
+      @ec.G1Affine::identity(),
+      id_b,
+      plaintext,
+      valid_ent,
+    )
     is Err(_),
+  )
+}
+
+///|
+test "adversarial security regression: entropy enforcement, klen bounds, and IND-CCA2 oracle" {
+  let p_pub_e = official_p_pub_e()
+  let de_b = official_de_b()
+  let id_b = b"Bob"
+  let plaintext = b"Chinese IBE standard"
+  let r = must_fn(
+    "0000aac0541779c8fc45e3e2cb25c12b5d2576b2129ae8bb5ee2cbe5ec9e785c",
+  )
+  assert_eq(@enc.MIN_ENTROPY_LEN, 32)
+  assert_eq(@enc.MAX_KDF_LEN, 16_777_216)
+
+  // 1. Empty and short entropy (0B, 16B, 31B) must be rejected by deterministic KEM & PKE
+  let ent_err = "entropy must be at least 32 bytes from a CSPRNG"
+  let short_entropies : Array[Bytes] = [
+    b"",
+    Bytes::make(16, b'\x11'),
+    Bytes::make(31, b'\x22'),
+  ]
+  for i = 0; i < short_entropies.length(); i = i + 1 {
+    let ent = short_entropies[i]
+    assert_eq(
+      @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 32, ent),
+      Err(ent_err),
+    )
+    assert_eq(
+      @enc.encrypt_deterministic(
+        p_pub_e,
+        id_b,
+        plaintext,
+        ent,
+        mode=@enc.KdfXor,
+      ),
+      Err(ent_err),
+    )
+    assert_eq(
+      @enc.encrypt_deterministic(
+        p_pub_e,
+        id_b,
+        plaintext,
+        ent,
+        mode=@enc.Sm4EcbPkcs7,
+      ),
+      Err(ent_err),
+    )
+  }
+  let ent32 = Bytes::make(32, b'\x33')
+  assert_true(
+    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, 32, ent32) is Ok(_),
+  )
+  assert_true(
+    @enc.encrypt_deterministic(
+      p_pub_e,
+      id_b,
+      plaintext,
+      ent32,
+      mode=@enc.KdfXor,
+    )
+    is Ok(_),
+  )
+
+  // 2. Oversized klen (> MAX_KDF_LEN) must be rejected across KEM APIs
+  let over_klen = @enc.MAX_KDF_LEN + 1
+  assert_true(
+    @enc.kem_encapsulate_with_r(p_pub_e, id_b, over_klen, r) is Err(_),
+  )
+  assert_true(
+    @enc.kem_encapsulate_deterministic(p_pub_e, id_b, over_klen, ent32)
+    is Err(_),
+  )
+  assert_true(
+    @enc.kem_decapsulate(id_b, de_b, @ec.G1Affine::generator(), over_klen)
+    is Err(_),
+  )
+
+  // 3. IND-CCA2 97-byte chosen-ciphertext oracle probe: C1 || 0x00*32 || 0x00
+  // Construct BOTH an ID where K1[0] == 0x00 and an ID where K1[0] != 0x00 for the same C1
+  // and verify both return the exact same Err("decryption failed").
+  let c1 = @ec.G1Affine::generator()
+  let c1_raw = c1.to_bytes_raw()
+  let probe97 = Bytes::makei(97, fn(i) {
+    if i < 64 {
+      c1_raw[i]
+    } else {
+      b'\x00'
+    }
+  })
+  let w = @pairing.pair_coords(de_b.x(), de_b.y(), c1.x(), c1.y())
+  let w_bytes = w.to_bytes()
+  let mut id_zero : Bytes = b""
+  let mut id_nonzero : Bytes = b""
+  let mut found_zero = false
+  let mut found_nonzero = false
+  for n = 0; n < 4096 && !(found_zero && found_nonzero); n = n + 1 {
+    let cand_id = Bytes::from_array([
+      ((n >> 8) & 0xFF).to_byte(),
+      (n & 0xFF).to_byte(),
+    ])
+    let kdf_in = Bytes::makei(450, fn(i) {
+      if i < 64 {
+        c1_raw[i]
+      } else if i < 448 {
+        w_bytes[i - 64]
+      } else {
+        cand_id[i - 448]
+      }
+    })
+    let k1_byte = @sm3.kdf(kdf_in, 1)[0]
+    if k1_byte == b'\x00' && !found_zero {
+      id_zero = cand_id
+      found_zero = true
+    } else if k1_byte != b'\x00' && !found_nonzero {
+      id_nonzero = cand_id
+      found_nonzero = true
+    }
+  }
+  assert_true(found_zero)
+  assert_true(found_nonzero)
+  assert_eq(
+    @enc.decrypt(id_zero, de_b, probe97, mode=@enc.KdfXor),
+    Err("decryption failed"),
+  )
+  assert_eq(
+    @enc.decrypt(id_nonzero, de_b, probe97, mode=@enc.KdfXor),
+    Err("decryption failed"),
+  )
+  assert_eq(
+    @enc.decrypt(id_b, de_b, probe97, mode=@enc.KdfXor),
+    Err("decryption failed"),
+  )
+  // Malformed C2 length for Sm4EcbPkcs7 (0B and 1B, not a non-zero multiple of 16)
+  // is rejected uniformly before pairing
+  assert_eq(
+    @enc.decrypt(id_b, de_b, probe97[0:96], mode=@enc.Sm4EcbPkcs7),
+    Err("decryption failed"),
+  )
+  assert_eq(
+    @enc.decrypt(id_b, de_b, probe97, mode=@enc.Sm4EcbPkcs7),
+    Err("decryption failed"),
   )
 }

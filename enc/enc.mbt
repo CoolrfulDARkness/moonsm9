@@ -1,4 +1,14 @@
 ///|
+/// Minimum required CSPRNG entropy length (32 bytes / 256 bits) for deterministic
+/// KEM encapsulation and public-key encryption.
+pub const MIN_ENTROPY_LEN : Int32 = 32
+
+///|
+/// Maximum allowed KDF output length (16 MiB) to prevent OOM DoS and `Int32`
+/// length arithmetic overflow (`k1_len + 32`).
+pub const MAX_KDF_LEN : Int32 = 16_777_216
+
+///|
 /// Encryption mode for SM9 public-key encryption (GB/T 38635.4-2020).
 /// - `KdfXor`: KDF-based stream cipher mode (Appendix A.2, `EnType = 0`).
 /// - `Sm4EcbPkcs7`: SM4-ECB with PKCS#7 padding mode (Appendix A.3, `EnType = 1`).
@@ -41,8 +51,9 @@ pub fn KemOutput::c1_bytes_uncompressed(self : KemOutput) -> Bytes {
 }
 
 ///|
-/// Constant-time check for whether every byte in `data` is zero.
-fn is_all_zero(data : BytesView) -> Bool {
+/// Constant-time full-scan check for whether every byte in `data` is zero.
+/// Never exits early on a non-zero byte.
+fn is_all_zero_ct(data : BytesView) -> Bool {
   let mut acc = 0
   for i = 0; i < data.length(); i = i + 1 {
     acc = acc | data[i].to_int()
@@ -227,8 +238,8 @@ pub fn kem_encapsulate_with_r(
   r : @field.Fn,
   hid~ : Byte = b'\x03',
 ) -> Result[KemOutput, String] {
-  if klen <= 0 {
-    return Err("klen must be positive")
+  if klen <= 0 || klen > MAX_KDF_LEN {
+    return Err("klen must be in [1, MAX_KDF_LEN]")
   }
   let (c1, c1_raw, w) = match encapsulate_core(p_pub_e, id_b, r, hid) {
     Ok(v) => v
@@ -236,7 +247,7 @@ pub fn kem_encapsulate_with_r(
   }
   let kdf_in = build_kdf_input(c1_raw, w, id_b)
   let key = @sm3.kdf(kdf_in, klen)
-  if is_all_zero(key) {
+  if is_all_zero_ct(key) {
     return Err("derived key is all zero")
   }
   Ok({ key, c1, })
@@ -244,8 +255,9 @@ pub fn kem_encapsulate_with_r(
 
 ///|
 /// Deterministic SM9 Key Encapsulation Mechanism (KEM) deriving ephemeral scalar `r`
-/// via domain-separated SM3 from `entropy` and public parameters, automatically retrying
-/// with an incremented counter if the derived key `K` is all zero.
+/// via domain-separated SM3 from `entropy` (at least `MIN_ENTROPY_LEN` = 32 bytes from
+/// a CSPRNG) and public parameters, automatically retrying with an incremented counter
+/// if the derived key `K` is all zero.
 pub fn kem_encapsulate_deterministic(
   p_pub_e : @ec.G1Affine,
   id_b : BytesView,
@@ -253,8 +265,11 @@ pub fn kem_encapsulate_deterministic(
   entropy : BytesView,
   hid~ : Byte = b'\x03',
 ) -> Result[KemOutput, String] {
-  if klen <= 0 {
-    return Err("klen must be positive")
+  if entropy.length() < MIN_ENTROPY_LEN {
+    return Err("entropy must be at least 32 bytes from a CSPRNG")
+  }
+  if klen <= 0 || klen > MAX_KDF_LEN {
+    return Err("klen must be in [1, MAX_KDF_LEN]")
   }
   match validate_p_pub_e(p_pub_e) {
     Err(e) => return Err(e)
@@ -291,8 +306,8 @@ pub fn kem_decapsulate(
   c1 : @ec.G1Affine,
   klen : Int32,
 ) -> Result[Bytes, String] {
-  if klen <= 0 {
-    return Err("klen must be positive")
+  if klen <= 0 || klen > MAX_KDF_LEN {
+    return Err("klen must be in [1, MAX_KDF_LEN]")
   }
   match validate_c1(c1) {
     Err(e) => return Err(e)
@@ -305,7 +320,7 @@ pub fn kem_decapsulate(
   let w = pair_g2_g1(de_b, c1)
   let kdf_in = build_kdf_input(c1.to_bytes_raw(), w, id_b)
   let key = @sm3.kdf(kdf_in, klen)
-  if is_all_zero(key) {
+  if is_all_zero_ct(key) {
     return Err("derived key is all zero")
   }
   Ok(key)
@@ -325,6 +340,13 @@ pub fn encrypt_with_r(
   mode~ : EncMode = KdfXor,
   hid~ : Byte = b'\x03',
 ) -> Result[Bytes, String] {
+  match mode {
+    KdfXor =>
+      if plaintext.length() > MAX_KDF_LEN - 32 {
+        return Err("plaintext exceeds maximum KdfXor length (MAX_KDF_LEN - 32)")
+      }
+    Sm4EcbPkcs7 => ()
+  }
   let (_, c1_raw, w) = match encapsulate_core(p_pub_e, id_b, r, hid) {
     Ok(v) => v
     Err(e) => return Err(e)
@@ -336,7 +358,7 @@ pub fn encrypt_with_r(
       let k = @sm3.kdf(kdf_in, k1_len + 32)
       let k1 = k[0:k1_len]
       let k2 = k[k1_len:k1_len + 32]
-      if k1_len > 0 && is_all_zero(k1) {
+      if k1_len > 0 && is_all_zero_ct(k1) {
         return Err("derived key K1 is all zero")
       }
       let c2 = Bytes::makei(k1_len, fn(i) {
@@ -349,7 +371,7 @@ pub fn encrypt_with_r(
       let k = @sm3.kdf(kdf_in, 48)
       let k1 = k[0:16]
       let k2 = k[16:48]
-      if is_all_zero(k1) {
+      if is_all_zero_ct(k1) {
         return Err("derived key K1 is all zero")
       }
       let c2 = match @sm4.encrypt_ecb_pkcs7(k1, plaintext) {
@@ -364,8 +386,9 @@ pub fn encrypt_with_r(
 
 ///|
 /// Deterministic SM9 Public-Key Encryption deriving ephemeral scalar `r` via domain-separated
-/// SM3 from `entropy`, `mode`, `plaintext` digest, and public parameters, automatically retrying
-/// with an incremented counter if `K1` is all zero.
+/// SM3 from `entropy` (at least `MIN_ENTROPY_LEN` = 32 bytes from a CSPRNG), `mode`,
+/// `plaintext` digest, and public parameters, automatically retrying with an incremented
+/// counter if `K1` is all zero.
 pub fn encrypt_deterministic(
   p_pub_e : @ec.G1Affine,
   id_b : BytesView,
@@ -374,6 +397,16 @@ pub fn encrypt_deterministic(
   mode~ : EncMode = KdfXor,
   hid~ : Byte = b'\x03',
 ) -> Result[Bytes, String] {
+  if entropy.length() < MIN_ENTROPY_LEN {
+    return Err("entropy must be at least 32 bytes from a CSPRNG")
+  }
+  match mode {
+    KdfXor =>
+      if plaintext.length() > MAX_KDF_LEN - 32 {
+        return Err("plaintext exceeds maximum KdfXor length (MAX_KDF_LEN - 32)")
+      }
+    Sm4EcbPkcs7 => ()
+  }
   match validate_p_pub_e(p_pub_e) {
     Err(e) => return Err(e)
     Ok(_) => ()
@@ -406,9 +439,10 @@ pub fn encrypt_deterministic(
 /// SM9 Public-Key Decryption (GB/T 38635.4-2020 Appendix A.2 `KdfXor` and Appendix A.3 `Sm4EcbPkcs7`).
 ///
 /// Expects raw ciphertext `C1 (64B) || C3 (32B) || C2`.
-/// Strictly validates `C1` on `G1` (rejecting infinity, out-of-range coordinates, and off-curve points),
-/// validates `de_B` in `G2` subgroup, and verifies `C3 = SM3(C2 || K2)` in constant time BEFORE
-/// decrypting `C2` to prevent ciphertext tampering and padding oracle attacks.
+/// Strictly validates public ciphertext lengths before pairing, validates `C1` on `G1`
+/// (rejecting infinity, out-of-range coordinates, and off-curve points) and `de_B` in `G2`
+/// subgroup, and verifies `C3 = SM3(C2 || K2)` and `K1 != 0` in constant time without
+/// distinguishing MAC failure from all-zero `K1` to prevent IND-CCA2 and padding oracles.
 pub fn decrypt(
   id_b : BytesView,
   de_b : @ec.G2Affine,
@@ -417,6 +451,14 @@ pub fn decrypt(
 ) -> Result[Bytes, String] {
   if ciphertext.length() < 96 {
     return Err("ciphertext too short (must be at least 96 bytes)")
+  }
+  let c2_len = ciphertext.length() - 96
+  match mode {
+    KdfXor => if c2_len > MAX_KDF_LEN - 32 { return Err("decryption failed") }
+    Sm4EcbPkcs7 =>
+      if c2_len == 0 || c2_len % 16 != 0 {
+        return Err("decryption failed")
+      }
   }
   match validate_de_b(de_b) {
     Err(e) => return Err(e)
@@ -437,12 +479,12 @@ pub fn decrypt(
       let k = @sm3.kdf(kdf_in, k1_len + 32)
       let k1 = k[0:k1_len]
       let k2 = k[k1_len:k1_len + 32]
-      if k1_len > 0 && is_all_zero(k1) {
-        return Err("derived key K1 is all zero")
-      }
       let expected_c3 = @sm3.mac(k2, c2)
-      if !@sm3.ct_eq_bytes(expected_c3, c3) {
-        return Err("MAC verification failed")
+      let mac_ok = @sm3.ct_eq_bytes(expected_c3, c3)
+      let k1_nonzero = if k1_len > 0 { !is_all_zero_ct(k1) } else { true }
+      let valid = (@field.ct_mask(mac_ok) & @field.ct_mask(k1_nonzero)) != 0UL
+      if !valid {
+        return Err("decryption failed")
       }
       let plaintext = Bytes::makei(k1_len, fn(i) {
         (c2[i].to_int() ^ k1[i].to_int()).to_byte()
@@ -453,16 +495,16 @@ pub fn decrypt(
       let k = @sm3.kdf(kdf_in, 48)
       let k1 = k[0:16]
       let k2 = k[16:48]
-      if is_all_zero(k1) {
-        return Err("derived key K1 is all zero")
-      }
       let expected_c3 = @sm3.mac(k2, c2)
-      if !@sm3.ct_eq_bytes(expected_c3, c3) {
-        return Err("MAC verification failed")
+      let mac_ok = @sm3.ct_eq_bytes(expected_c3, c3)
+      let k1_nonzero = !is_all_zero_ct(k1)
+      let valid = (@field.ct_mask(mac_ok) & @field.ct_mask(k1_nonzero)) != 0UL
+      if !valid {
+        return Err("decryption failed")
       }
       match @sm4.decrypt_ecb_pkcs7(k1, c2) {
         Some(plaintext) => Ok(plaintext)
-        None => Err("SM4-ECB-PKCS7 decryption or padding validation failed")
+        None => Err("decryption failed")
       }
     }
   }

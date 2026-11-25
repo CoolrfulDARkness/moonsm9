@@ -391,3 +391,83 @@ test "Adversarial: tampered S_B, tampered S_A, and swapped ID_A/ID_B fail confir
     !@keyex.verify_responder_confirmation(res_b.s_2, res_a_swapped.s_a),
   )
 }
+
+///|
+test "Adversarial: MAX_KDF_LEN bound enforcement and constant-time result equality" {
+  let (p_pub_e, de_a, de_b, r_a, r_b) = official_fixture()
+  let id_a = b"Alice"
+  let id_b = b"Bob"
+  let ra_pt = match @keyex.generate_ephemeral(p_pub_e, id_b, r_a) {
+    Ok(pt) => pt
+    Err(e) => abort(e)
+  }
+  let rb_pt = match @keyex.generate_ephemeral(p_pub_e, id_a, r_b) {
+    Ok(pt) => pt
+    Err(e) => abort(e)
+  }
+  assert_eq(@keyex.MAX_KDF_LEN, 16_777_216)
+  let over_klen = @keyex.MAX_KDF_LEN + 1
+  assert_true(
+    @keyex.responder_exchange(
+      p_pub_e, id_a, id_b, de_b, r_b, ra_pt, rb_pt, over_klen,
+    )
+    is Err(_),
+  )
+  assert_true(
+    @keyex.initiator_exchange(
+      p_pub_e, id_a, id_b, de_a, r_a, ra_pt, rb_pt, over_klen,
+    )
+    is Err(_),
+  )
+
+  // Constant-time ct_eq / Eq on ResponderResult and InitiatorResult
+  let res_b1 = match
+    @keyex.responder_exchange(p_pub_e, id_a, id_b, de_b, r_b, ra_pt, rb_pt, 16) {
+    Ok(r) => r
+    Err(e) => abort(e)
+  }
+  let res_b2 = match
+    @keyex.responder_exchange(p_pub_e, id_a, id_b, de_b, r_b, ra_pt, rb_pt, 16) {
+    Ok(r) => r
+    Err(e) => abort(e)
+  }
+  let res_b_32 = match
+    @keyex.responder_exchange(p_pub_e, id_a, id_b, de_b, r_b, ra_pt, rb_pt, 32) {
+    Ok(r) => r
+    Err(e) => abort(e)
+  }
+  assert_true(res_b1.ct_eq(res_b2))
+  assert_eq(res_b1, res_b2)
+  assert_true(!res_b1.ct_eq(res_b_32))
+  assert_true(res_b1 != res_b_32)
+
+  let res_a1 = match
+    @keyex.initiator_exchange(p_pub_e, id_a, id_b, de_a, r_a, ra_pt, rb_pt, 16) {
+    Ok(r) => r
+    Err(e) => abort(e)
+  }
+  let res_a2 = match
+    @keyex.initiator_exchange(
+      p_pub_e,
+      id_a,
+      id_b,
+      de_a,
+      r_a,
+      ra_pt,
+      rb_pt,
+      16,
+      peer_s_b=res_b1.s_b,
+    ) {
+    Ok(r) => r
+    Err(e) => abort(e)
+  }
+  let res_a_32 = match
+    @keyex.initiator_exchange(p_pub_e, id_a, id_b, de_a, r_a, ra_pt, rb_pt, 32) {
+    Ok(r) => r
+    Err(e) => abort(e)
+  }
+  assert_true(res_a1.ct_eq(res_a2))
+  assert_eq(res_a1, res_a2)
+  assert_true(!res_a1.ct_eq(res_a_32))
+  assert_true(res_a1 != res_a_32)
+}

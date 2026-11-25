@@ -8,6 +8,10 @@ import {
 }
 
 // Values
+pub const MAX_KDF_LEN : Int32 = 16_777_216
+
+pub const MIN_ENTROPY_LEN : Int32 = 32
+
 pub fn decrypt(BytesView, @ec.G2Affine, BytesView, mode? : EncMode) -> Result[Bytes, String]
 
 pub fn encrypt_deterministic(@ec.G1Affine, BytesView, BytesView, BytesView, mode? : EncMode, hid? : Byte) -> Result[Bytes, String]

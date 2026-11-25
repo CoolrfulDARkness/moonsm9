@@ -442,3 +442,44 @@ test "Error paths for invalid inputs to signing functions" {
     is Err(_),
   )
 }
+
+///|
+test "Adversarial: reject -1 and non-cyclotomic Fp12 elements as precomputed g" {
+  let id_a = b"Alice"
+  let msg = b"Chinese IBS standard"
+  let p_pub_s = official_p_pub_s()
+  let ds_a = official_ds_a()
+  let g = @sign.precompute_g(p_pub_s)
+  let r = must_fn(
+    "00033c8616b06704813203dfd00965022ed15975c662337aed648835dc4b1cbe",
+  )
+  let sig = match @sign.sign_with_r(p_pub_s, ds_a, msg, r) {
+    Ok(s) => s
+    Err(e) => abort(e)
+  }
+  // -1 lies in the unitary subgroup (g * conj(g) == 1) but NOT in G_{Phi_6}(Fp2)
+  let neg_one = @field.Fp12::one().neg()
+  // General non-cyclotomic elements in Fp12
+  let two = @field.Fp12::one().add(@field.Fp12::one())
+  let non_cyclotomic = @field.Fp12::new(
+    @field.Fp6::from_fp2(@field.Fp2::from_fp(@field.Fp::from_u64(3UL))),
+    @field.Fp6::one(),
+  )
+  let perturbed_g = g.add(@field.Fp12::one())
+
+  assert_true(@sign.sign_with_r_precomputed(neg_one, ds_a, msg, r) is Err(_))
+  assert_true(@sign.sign_with_r_precomputed(two, ds_a, msg, r) is Err(_))
+  assert_true(
+    @sign.sign_with_r_precomputed(non_cyclotomic, ds_a, msg, r) is Err(_),
+  )
+  assert_true(
+    @sign.sign_with_r_precomputed(perturbed_g, ds_a, msg, r) is Err(_),
+  )
+
+  assert_true(!@sign.verify_precomputed(p_pub_s, neg_one, id_a, msg, sig))
+  assert_true(!@sign.verify_precomputed(p_pub_s, two, id_a, msg, sig))
+  assert_true(
+    !@sign.verify_precomputed(p_pub_s, non_cyclotomic, id_a, msg, sig),
+  )
+  assert_true(!@sign.verify_precomputed(p_pub_s, perturbed_g, id_a, msg, sig))
+}

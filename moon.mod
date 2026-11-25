@@ -8,7 +8,16 @@ repository = "https://github.com/CoolrfulDARkness/moonsm9"
 
 license = "Apache-2.0"
 
-keywords = ["sm9", "gb-t-38635", "cryptography", "ibe", "pairing", "bn256", "sm3", "guomi"]
+keywords = [
+  "sm9",
+  "gb-t-38635",
+  "cryptography",
+  "ibe",
+  "pairing",
+  "bn256",
+  "sm3",
+  "guomi",
+]
 
 preferred_target = "wasm-gc"
 

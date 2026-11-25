@@ -971,6 +971,14 @@ fn is_known_subcommand(arg : String) -> Bool {
 }
 
 ///|
+fn is_runtime_script_arg(arg : String) -> Bool {
+  arg.has_suffix(".js") ||
+  arg.has_suffix(".mjs") ||
+  arg.has_suffix(".cjs") ||
+  arg.has_suffix(".wasm")
+}
+
+///|
 fn extract_subcommand_args(raw_args : Array[String]) -> Array[String] {
   let n = raw_args.length()
   if n == 0 {
@@ -980,9 +988,15 @@ fn extract_subcommand_args(raw_args : Array[String]) -> Array[String] {
   if is_known_subcommand(raw_args[0]) {
     return raw_args
   }
-  // Otherwise drop argv[0] (executable/script path).
+  // Drop argv[0] (executable path); on Node.js (--target js), also drop argv[1] (script .js path).
+  let mut start = 1
+  if start < n &&
+    !is_known_subcommand(raw_args[start]) &&
+    is_runtime_script_arg(raw_args[start]) {
+    start = 2
+  }
   let out : Array[String] = []
-  for i = 1; i < n; i = i + 1 {
+  for i = start; i < n; i = i + 1 {
     out.push(raw_args[i])
   }
   out

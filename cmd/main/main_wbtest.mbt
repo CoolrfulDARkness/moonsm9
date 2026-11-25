@@ -17,6 +17,11 @@ test "CLI extract_subcommand_args handles empty, prog-only, prog+cmd, and raw cm
   assert_eq(extract_subcommand_args(["./main.exe", "sm3", "abc"]), [
     "sm3", "abc",
   ])
+  assert_eq(extract_subcommand_args(["node.exe", "D:\\app\\main.js"]), [])
+  assert_eq(
+    extract_subcommand_args(["node.exe", "D:\\app\\main.js", "sm3", "abc"]),
+    ["sm3", "abc"],
+  )
   assert_eq(extract_subcommand_args(["selftest"]), ["selftest"])
   assert_eq(extract_subcommand_args(["help"]), ["help"])
 }

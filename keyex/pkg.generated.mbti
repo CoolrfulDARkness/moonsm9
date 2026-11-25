@@ -1,0 +1,38 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "CoolrfulDARkness/moonsm9/keyex"
+
+import {
+  "CoolrfulDARkness/moonsm9/ec",
+  "CoolrfulDARkness/moonsm9/field",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn generate_ephemeral(@ec.G1Affine, BytesView, @field.Fn, hid? : Byte) -> Result[@ec.G1Affine, String]
+
+pub fn initiator_exchange(@ec.G1Affine, BytesView, BytesView, @ec.G2Affine, @field.Fn, @ec.G1Affine, @ec.G1Affine, Int32, peer_s_b? : BytesView) -> Result[InitiatorResult, String]
+
+pub fn responder_exchange(@ec.G1Affine, BytesView, BytesView, @ec.G2Affine, @field.Fn, @ec.G1Affine, @ec.G1Affine, Int32) -> Result[ResponderResult, String]
+
+pub fn verify_responder_confirmation(BytesView, BytesView) -> Bool
+
+// Errors
+
+// Types and methods
+#derive(Eq, @debug.Debug)
+pub struct InitiatorResult {
+  sk : Bytes
+  s_a : Bytes
+  s_1 : Bytes
+}
+
+#derive(Eq, @debug.Debug)
+pub struct ResponderResult {
+  sk : Bytes
+  s_b : Bytes
+  s_2 : Bytes
+}
+
+// Type aliases
+
+// Traits

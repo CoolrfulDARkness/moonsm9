@@ -56,6 +56,7 @@ moon test --target native -d
 
 ```bash
 # Default subcommand runs all 6 GB/T 38635-2020 verification suites
+moon run cmd/main --target wasm
 moon run cmd/main --target wasm-gc
 moon run cmd/main --target js
 moon run cmd/main --target native
@@ -93,14 +94,16 @@ See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for all 13 benchmark entries 
 
 ### 4. Minimal Usage Example
 
-Add `CoolrfulDARkness/moonsm9` to your `moon.mod` and import the sub-packages (or the root facade) in your `moon.pkg`:
+Add `CoolrfulDARkness/moonsm9` to your `moon.mod` and import the sub-packages (or the root facade) in your `moon.pkg`.
+
+> **Entropy Requirement**: Because `moonsm9` has zero OS FFI, callers must supply fresh cryptographic randomness from an external CSPRNG. In particular, SM9 KEM (`kem_encapsulate_deterministic`) and PKE (`encrypt_deterministic`) strictly require **at least 32 bytes** of fresh CSPRNG entropy per operation.
 
 ```moonbit nocheck
 // --- Part 2: SM9 Digital Signature ---
 
 ///|
 let sign_msk = @kgc.SignMasterPrivateKey::from_seed(
-  b"demo-sign-master-seed-32bytes!!",
+  b"demo-sign-master-seed-32bytes!!!",
 )
 
 ///|
@@ -124,7 +127,7 @@ let ok = @sign.verify(sign_mpk.to_g2(), b"Alice", b"Hello MoonBit SM9", sig)
 
 ///|
 let enc_msk = @kgc.EncMasterPrivateKey::from_seed(
-  b"demo-enc-master-seed-32bytes!!!",
+  b"demo-enc-master-seed-32bytes!!!!",
 )
 
 ///|
@@ -134,11 +137,12 @@ let enc_mpk = enc_msk.public_key()
 let bob_sk = @kgc.extract_enc_private_key(enc_msk, b"Bob").unwrap()
 
 ///|
+// KEM and PKE require >= 32 bytes of fresh CSPRNG entropy per operation.
 let ct = @enc.encrypt_deterministic(
   enc_mpk.to_g1(),
   b"Bob",
   b"Confidential payload",
-  b"fresh-enc-entropy",
+  b"fresh-32byte-csprng-enc-entropy!",
   mode=@enc.EncMode::Sm4EcbPkcs7,
 ).unwrap()
 
@@ -155,7 +159,7 @@ let pt = @enc.decrypt(
 
 ## Documentation
 
-- **[Architecture & Mathematical Design](docs/ARCHITECTURE.md)** — Layered 10-package architecture, BN256 parameters, 4×64-bit Montgomery arithmetic, zero-cost tower basis isomorphism, constant-time Jacobian EC groups, zero-inversion R-ate pairing, interoperability rules, and security boundaries.
+- **[Architecture & Mathematical Design](docs/ARCHITECTURE.md)** — Layered 11-package architecture, BN256 parameters, 4×64-bit Montgomery arithmetic, zero-cost tower basis isomorphism, constant-time Jacobian EC groups, zero-inversion R-ate pairing, interoperability rules, and security boundaries.
 - **[Verification, Test Vectors & Benchmarks](docs/VERIFICATION.md)** — Independent Python 3 mathematical reference methodology, GB/T 38635-2020 Appendix A coverage matrix, bilinear identities, adversarial input testing, and release benchmark tables.
 
 ---

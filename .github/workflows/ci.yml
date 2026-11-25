@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
@@ -15,6 +18,7 @@ jobs:
   format-and-interface:
     name: Format & Interface Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,10 +38,15 @@ jobs:
         run: |
           moon info
           git diff --exit-code -- '*.mbti'
+          test -z "$(git status --porcelain -- '*.mbti')"
+
+      - name: Verify README.mbt.md and README.md are identical
+        run: cmp -s README.mbt.md README.md
 
   test-matrix:
     name: Test (${{ matrix.target }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -67,10 +76,11 @@ jobs:
   cli-smoke:
     name: CLI Selftest (${{ matrix.target }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        target: [wasm-gc, js, native]
+        target: [wasm, wasm-gc, js, native]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -93,9 +103,13 @@ jobs:
       - name: Run built-in GB/T 38635-2020 CLI selftest
         run: moon run cmd/main --target ${{ matrix.target }}
 
+      - name: Run CLI subcommand smoke test (sm3 abc)
+        run: moon run cmd/main --target ${{ matrix.target }} -- sm3 abc
+
   bench-smoke:
     name: Benchmark Smoke (native)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -108,5 +122,5 @@ jobs:
       - name: Verify C compiler
         run: gcc --version
 
-      - name: Run release benchmark suite
-        run: moon bench --release --target native
+      - name: Run release benchmark suite (zero-warning -d)
+        run: moon bench --release --target native -d

@@ -73,34 +73,40 @@ Beyond fixed test vectors, the test suite asserts mathematical invariants over d
 | **Key-exchange tampering & role confusion** | `keyex::initiator_exchange`, `verify_responder_confirmation` | Tampered `S_B`, tampered `S_A`, swapped `ID_A`/`ID_B`, infinity `R_A`/`R_B`, or `klen <= 0` rejected. |
 | **Ciphertext truncation, MAC tampering & mode mismatch** | `enc::decrypt` | Ciphertext `< 96` bytes, bit-flipped `C1`, bit-flipped `C3`, bit-flipped `C2`, wrong recipient key/ID, or `KdfXor` vs `Sm4EcbPkcs7` mismatch rejected before plaintext release. |
 | **SM4 PKCS#7 padding oracle tampering** | `sm4::decrypt_ecb_pkcs7`, `enc::decrypt` | Empty/non-16B-multiple ciphertext, pad `0x00`/`0x11`/`0xff`, single-byte corruption at every offset for all pad lengths `2..16`, and last-block bit-flips rejected in constant time (`None`). |
+| **KEM / PKE zero-entropy & `< 32B` short-entropy rejection** | `enc::kem_encapsulate_deterministic`, `enc::encrypt_deterministic` | Empty (`0B`) and `< 32B` entropy inputs strictly return `Err(...)`, preventing deterministic ciphertext replay and offline dictionary attacks. |
+| **97B IND-CCA2 first-byte plaintext oracle probe** | `enc::decrypt` | Forged 97-byte ciphertexts probing `is_all_zero_ct(K1)` vs invalid `C3` MAC return an indistinguishable unified error via constant-time combined `MAC && !is_all_zero_ct(K1)` verification. |
+| **Non-cyclotomic precomputed `g` (e.g., `-1`) injection** | `field::Fp12::is_in_cyclotomic_subgroup`, `sign::*_precomputed` | Non-cyclotomic `Fp12` elements (such as `-1`) are rejected at precomputed sign/verify entry points before cyclotomic exponentiation. |
+| **KDF output-length OOM DoS (`MAX_KDF_LEN`)** | `sm3::kdf`, `keyex`, `enc` | Requests with `klen <= 0` or `klen > MAX_KDF_LEN` are rejected without unbounded allocation. |
+| **Key-exchange constant-time `ct_eq` confirmation** | `keyex` | Confirmation tags (`S_B`/`S_1`, `S_A`/`S_2`) and derived key equality use constant-time `ct_eq`, rejecting single-bit tampering without short-circuit leakage. |
 
 ---
 
 ## 5. Package Unit Test Inventory & Multi-Target `-d` Verification
 
-Each of the 9 core library packages is independently verified with `-d` (zero warnings, zero errors) across targets:
+Each of the 9 core library packages, the root facade, and the CLI package is independently verified with `-d` (zero warnings, zero errors) across targets:
 
 | Package | Verified Sub-Package Tests | Key Coverage |
 |---|---|---|
-| `sm3` | 10 (9 blackbox + 1 whitebox) | GB/T 32905 App. A.1/A.2, empty/block boundaries (55..128B), streaming/reset, `KDF`, `MAC` order, `H1`/`H2` 320-bit reduction & cross-limb boundaries, `ct_eq_bytes` |
+| `sm3` | 10 (9 blackbox + 1 whitebox) | GB/T 32905 App. A.1/A.2, empty/block boundaries (55..128B), streaming/reset, `KDF` & `MAX_KDF_LEN` OOM cap, `MAC` order, `H1`/`H2` 320-bit reduction & cross-limb boundaries, `ct_eq_bytes` |
 | `sm4` | 5 | GB/T 32907 App. A.1, GB/T 38635.4 App. A.3, 0..48B PKCS#7 boundaries, invalid lengths, exhaustive padding-tampering checks |
-| `field` | 9 | `adc`/`sbb`/`mac` overflow, `Fp`/`Fn`/`Fp2`/`Fp6`/`Fp12` axioms, 13 Frobenius constants, `mul_by_014`, `cyclotomic_sqr`, `cyclotomic_pow_t`, 384B `FE2OS` roundtrip & `>= p` rejection |
+| `field` | 10 | `adc`/`sbb`/`mac` overflow, `Fp`/`Fn`/`Fp2`/`Fp6`/`Fp12` axioms, `Fp`/`Fp2::is_zero_mask`, `Fp12::is_in_cyclotomic_subgroup`, 13 Frobenius constants, `mul_by_014`, `cyclotomic_sqr`, `cyclotomic_pow_t`, 384B `FE2OS` roundtrip & `>= p` rejection |
 | `ec` | 9 (blackbox + whitebox) | `P1`/`P2` generators & order `N`, Part 2/3/4 official scalar-mul vectors, all codec formats, off-curve/`5/u`/cofactor attacks & `[h2]Q` cofactor clearing |
-| `pairing` | 5 | All 7 official 384B pairing vectors (`e(P2,P1)`, Part 2 `g`, Part 3 `g1`/`g2`/`g3`, Part 4 `g`/`w`), order `N`, bilinearity, joint `pair_product_coords` |
+| `pairing` | 5 | All 8 official 384B pairing values (`e(P2,P1)`, Part 2 `g`, Part 3 `g1`/`g2`/`g3`, Part 4 `g`/`w` across A.1–A.3), order `N`, bilinearity, joint `pair_product_coords` |
 | `kgc` | 7 | Part 2/3/4 official master & user keys, `t1 == 0` error path, `from_seed` domain separation, strict codecs & adversarial point rejection |
-| `sign` | 6 | Part 2 App. A official vector, `verify` & `verify_precomputed`, deterministic signing & entropy separation, custom `hid`, 96B/97B codecs, forgery attacks |
-| `keyex` | 4 | Part 3 App. A official handshake (`SK`, `S_B==S_1`, `S_A==S_2`), 16/32/64B handshakes, tampered tags & swapped IDs |
-| `enc` | 6 | Part 4 App. A.1 (KEM), A.2 (KDF-XOR), A.3 (SM4-ECB-PKCS#7), empty/block-boundary/long plaintexts, tampering/truncation/off-curve/mode-mismatch |
+| `sign` | 7 | Part 2 App. A official vector, `verify` & `verify_precomputed`, non-cyclotomic `-1` precomputed `g` rejection, deterministic signing & entropy separation, custom `hid`, 96B/97B codecs, forgery attacks |
+| `keyex` | 6 | Part 3 App. A official handshake (`SK`, `S_B==S_1`, `S_A==S_2`), 16/32/64B handshakes, constant-time `ct_eq`, `MAX_KDF_LEN` cap, tampered tags & swapped IDs |
+| `enc` | 7 | Part 4 App. A.1 (KEM), A.2 (KDF-XOR), A.3 (SM4-ECB-PKCS#7), zero/`< 32B` entropy rejection, 97B IND-CCA2 unified error oracle probe, `MAX_KDF_LEN` cap, tampering/truncation/off-curve/mode-mismatch |
 | Root `moonsm9` | 7 (6 blackbox + 1 whitebox) | Full E2E GB/T 38635.2/.3/.4 Appendix A via facade, bilinearity property suite, adversarial malformed/forgery matrix |
-| `cmd/main` | 3 + 6-stage CLI selftest | CLI command dispatch (`selftest`, `sm3`, `keygen`, `sign`, `keyex`, `encrypt`, `help`) & built-in 6-stage GB/T 38635-2020 selftest |
-| **Total** | **71 unit/integration tests + 13 benchmarks** | **0 errors, 0 warnings (`-d`) across `wasm`, `wasm-gc`, `js`, and `native`** |
+| `cmd/main` | 4 + 6-stage CLI selftest | CLI argv/runtime normalization, strict arity, domain-separated derivation, command dispatch & built-in 6-stage GB/T 38635-2020 selftest |
+| **Total** | **77 unit/integration tests + 13 benchmarks** | **0 errors, 0 warnings (`-d`) across `wasm`, `wasm-gc`, `js`, and `native`** |
 
 ### Reproducible Multi-Target Verification Commands
 
 ```bash
-# Formatting & generated .mbti interface check
+# Formatting, generated .mbti interfaces & dual-README parity check
 moon fmt --check
-moon info && git diff --exit-code -- '*.mbti'
+moon info && git diff --exit-code -- '*.mbti' && test -z "$(git status --porcelain -- '*.mbti')"
+cmp -s README.mbt.md README.md
 
 # Full test suite with zero-warning enforcement (-d) across all 4 targets
 moon test --target wasm -d
@@ -108,10 +114,11 @@ moon test --target wasm-gc -d
 moon test --target js -d
 moon test --target native -d
 
-# Built-in 6-stage GB/T 38635-2020 CLI selftest across 3 targets
-moon run cmd/main --target wasm-gc
-moon run cmd/main --target js
-moon run cmd/main --target native
+# Built-in 6-stage GB/T 38635-2020 CLI selftest & subcommand smoke across all 4 targets
+moon run cmd/main --target wasm && moon run cmd/main --target wasm -- sm3 abc
+moon run cmd/main --target wasm-gc && moon run cmd/main --target wasm-gc -- sm3 abc
+moon run cmd/main --target js && moon run cmd/main --target js -- sm3 abc
+moon run cmd/main --target native && moon run cmd/main --target native -- sm3 abc
 ```
 
 ---

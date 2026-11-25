@@ -15,7 +15,7 @@ Cryptographic libraries built on foreign C bindings (`OpenSSL`, `GmSSL`, `libgmp
 
 ---
 
-## 2. Layered 10-Package Architecture
+## 2. Layered 11-Package Architecture
 
 `moonsm9` is structured as a strict directed acyclic graph (DAG) with 9 cohesive library sub-packages, a unified root facade package, and a multi-target executable CLI:
 
@@ -99,7 +99,8 @@ flowchart TD
 | `CoolrfulDARkness/moonsm9/sign` | GB/T 38635.2 signature (`sign_with_r`, `sign_deterministic`, `verify`, precomputed variants, 96B/97B codecs) | `sm3`, `field`, `ec`, `pairing` |
 | `CoolrfulDARkness/moonsm9/keyex` | GB/T 38635.3 key exchange (`generate_ephemeral`, `responder_exchange`, `initiator_exchange`, mutual confirmation) | `sm3`, `field`, `ec`, `pairing` |
 | `CoolrfulDARkness/moonsm9/enc` | GB/T 38635.4 KEM & PKE (`EncMode::KdfXor`, `EncMode::Sm4EcbPkcs7`, MAC-then-decrypt) | `sm3`, `sm4`, `field`, `ec`, `pairing` |
-| `CoolrfulDARkness/moonsm9` & `cmd/main` | Unified top-level facade + standalone CLI (`selftest`, `sm3`, `keygen`, `sign`, `keyex`, `encrypt`) | All sub-packages |
+| `CoolrfulDARkness/moonsm9` | Unified top-level SM9 facade API | `sm3`, `sm4`, `field`, `ec`, `pairing`, `kgc`, `sign`, `keyex`, `enc` (all 9 internal sub-packages) |
+| `CoolrfulDARkness/moonsm9/cmd/main` | Standalone multi-target CLI (`selftest`, `sm3`, `keygen`, `sign`, `keyex`, `encrypt`) | `sm3`, `field`, `ec`, `pairing`, `kgc`, `sign`, `keyex`, `enc` (8 internal sub-packages; excludes `sm4`) |
 
 ---
 
@@ -224,14 +225,16 @@ All four protocol packages (`kgc`, `sign`, `keyex`, `enc`) strictly enforce the 
 ## 4. Side-Channel & Security Engineering Boundaries
 
 ### Implemented Defenses
-- **Constant-time field & group primitives**: Branchless `adc`/`sbb`, constant-time conditional reduction (`fp_sub_if_gte`), constant-time Fermat inversions, complete branchless Jacobian point addition, and 4-bit fixed-window scalar multiplication with full 16-entry linear table scans.
+- **Constant-time field & group primitives**: Branchless `adc`/`sbb`, constant-time conditional reduction (`fp_sub_if_gte`), full-width bitmask zero checks (`Fp::is_zero_mask` and `Fp2::is_zero_mask`, eliminating hot-path `Bool`/`if` conversions), constant-time Fermat inversions, complete branchless Jacobian point addition, and 4-bit fixed-window scalar multiplication with full 16-entry linear table scans.
+- **Cyclotomic subgroup validation for precomputed pairings**: `Fp12::is_in_cyclotomic_subgroup` validates caller-supplied precomputed pairing elements `g` at precomputed signing and verification entry points, rejecting non-cyclotomic elements (such as `-1` or arbitrary off-subgroup values) before fast cyclotomic exponentiation.
 - **Constant-time verification**: MAC tags (`C3`), key-exchange confirmation hashes (`S_B`, `S_1`, `S_A`, `S_2`), signature scalar checks (`h2.ct_eq(sig.h)`), key equality (`ct_eq`), and SM4 PKCS#7 padding validation all avoid short-circuiting secret byte comparisons.
-- **MAC-then-decrypt & strict parsing**: `enc::decrypt` verifies `C3` in constant time *before* decrypting `C2` or unpadding PKCS#7, preventing padding-oracle leakage. All point/scalar decoders reject wrong lengths, non-canonical coordinates ($\ge p$ or $\ge N$), infinity/all-zero encodings, off-curve points, wrong-twist points, and $\mathbb{G}_2$ cofactor points.
+- **IND-CCA2 unified error & MAC-then-decrypt**: `enc::decrypt` evaluates `C3` MAC verification and `!is_all_zero_ct(K1)` together in constant time and returns a single unified error on any failure *before* decrypting `C2` or unpadding PKCS#7—eliminating both padding-oracle leakage and IND-CCA2 first-byte plaintext recovery oracles. All point/scalar decoders reject wrong lengths, non-canonical coordinates ($\ge p$ or $\ge N$), infinity/all-zero encodings, off-curve points, wrong-twist points, and $\mathbb{G}_2$ cofactor points.
+- **Mandatory >= 32-byte fresh CSPRNG entropy for KEM & PKE**: `kem_encapsulate_deterministic` and `encrypt_deterministic` strictly enforce a minimum of **32 bytes** of caller-supplied CSPRNG random entropy (rejecting empty or `< 32B` inputs), preventing zero-entropy ciphertext replay and offline dictionary attacks against identity-based encryption.
 - **All-zero key rejection**: Part 3 `SK` and Part 4 `K`/`K1` are explicitly checked for all-zero outputs (returning `Err` in `_with_r` APIs and automatically retrying with incremented counter in deterministic APIs).
 - **Domain-separated deterministic nonces**: `sign_deterministic`, `kem_encapsulate_deterministic`, and `encrypt_deterministic` derive ephemeral scalars via length-prefixed, domain-separated SM3 hashing over public parameters, private keys/recipient IDs, messages, caller-supplied entropy, and retry counters—eliminating weak-RNG nonce reuse while remaining pure MoonBit with zero OS RNG FFI.
 
 ### Explicit Scope & Known Boundaries
 1. **Managed runtime & compiler backend limits**: While `moonsm9` eliminates secret-dependent branches and secret-indexed lookups in elliptic-curve and finite-field source code, higher-level execution environments (WebAssembly engines, V8/Node.js JITs, and C/LLVM optimizing backends) do not provide formal hardware-level constant-time guarantees against microarchitectural side channels without target-specific assembly inspection.
-2. **SM4 S-box table lookups**: `sm4` uses standard 256-byte lookup S-box tables (`sbox`) rather than bitsliced AES/SM4 instructions; deployments requiring cache-timing immunity for standalone high-frequency SM4 on shared multi-tenant hosts should account for this boundary.
-3. **Caller-supplied entropy**: Because `moonsm9` has zero OS FFI, callers invoking `*_from_seed` or `*_deterministic` APIs in production are responsible for supplying high-entropy seeds / fresh per-operation CSPRNG bytes from their host runtime.
+2. **SM4 S-box table lookups (non-cache-side-channel-resistant scope)**: `sm4` uses standard 256-byte lookup S-box tables (`sbox`), which fall outside the cache-side-channel-resistant threat model on shared hardware caches. Within SM9 PKE (`EncMode::Sm4EcbPkcs7`), each ciphertext uses a fresh single-use KDF-derived symmetric key `K1` combined with Encrypt-then-MAC (`C3`), limiting exposure; the S-box implementation can be replaced with a bitsliced S-box in future work if standalone cache-timing immunity on shared multi-tenant hardware is required.
+3. **Caller-supplied entropy**: Because `moonsm9` has zero OS FFI, callers invoking `*_from_seed` or `*_deterministic` APIs in production are responsible for supplying high-entropy seeds / fresh per-operation CSPRNG bytes (at least 32 bytes for KEM and PKE) from their host runtime.
 4. **Audit status**: This library has been rigorously cross-verified against GB/T 38635-2020 official test vectors and adversarial tests (see [`VERIFICATION.md`](VERIFICATION.md)), but has not yet undergone a formal third-party cryptographic security audit for regulated HSM / commercial GM compliance certification.

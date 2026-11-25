@@ -11,17 +11,39 @@ fn join_lines(lines : Array[String]) -> String {
 }
 
 ///|
-test "CLI extract_subcommand_args handles empty, prog-only, prog+cmd, and raw cmd" {
+test "CLI extract_subcommand_args handles empty, prog-only, prog+cmd, JS runtimes, and raw cmd" {
   assert_eq(extract_subcommand_args([]), [])
   assert_eq(extract_subcommand_args(["./main.exe"]), [])
   assert_eq(extract_subcommand_args(["./main.exe", "sm3", "abc"]), [
     "sm3", "abc",
   ])
+  // Native/non-JS executable must NOT swallow .js/.mjs/.cjs/.wasm user arguments
+  assert_eq(extract_subcommand_args(["./main.exe", "foo.js"]), ["foo.js"])
+  assert_eq(extract_subcommand_args(["./main.exe", "foo.wasm"]), ["foo.wasm"])
+  assert_eq(extract_subcommand_args(["./main.exe", "sm3", "foo.js"]), [
+    "sm3", "foo.js",
+  ])
+  // Case-insensitive JS runtime basename + case-insensitive .js/.mjs/.cjs script skipping
   assert_eq(extract_subcommand_args(["node.exe", "D:\\app\\main.js"]), [])
+  assert_eq(extract_subcommand_args(["node.exe", "D:\\app\\MAIN.JS"]), [])
   assert_eq(
-    extract_subcommand_args(["node.exe", "D:\\app\\main.js", "sm3", "abc"]),
+    extract_subcommand_args(["node.exe", "D:\\app\\MAIN.JS", "sm3", "abc"]),
     ["sm3", "abc"],
   )
+  assert_eq(
+    extract_subcommand_args([
+      "C:\\Program Files\\nodejs\\NODE.EXE", "D:\\app\\MAIN.MJS", "help",
+    ]),
+    ["help"],
+  )
+  assert_eq(
+    extract_subcommand_args(["/usr/local/bin/deno", "/tmp/cli.CJS", "sm3", "x"]),
+    ["sm3", "x"],
+  )
+  assert_eq(extract_subcommand_args(["/opt/bun/BUN", "entry.js", "selftest"]), [
+    "selftest",
+  ])
+  assert_eq(extract_subcommand_args(["bun.exe", "entry.wasm"]), ["entry.wasm"])
   assert_eq(extract_subcommand_args(["selftest"]), ["selftest"])
   assert_eq(extract_subcommand_args(["help"]), ["help"])
 }
@@ -101,8 +123,32 @@ test "CLI subcommands: sm3, keygen, sign, keyex, encrypt (xor & sm4), help" {
   assert_true(help_out.contains("selftest"))
   assert_true(help_out.contains("encrypt"))
 
-  // error cases
+  // error cases: unknown command, missing args, invalid mode, and trailing extra args
   assert_true(execute_cli(["unknown-cmd"]) is Err(_))
+  assert_true(execute_cli(["selftest", "extra"]) is Err(_))
+  assert_true(execute_cli(["help", "extra"]) is Err(_))
+  assert_true(execute_cli(["--help", "extra"]) is Err(_))
+  assert_true(execute_cli(["-h", "extra"]) is Err(_))
   assert_true(execute_cli(["sm3"]) is Err(_))
+  assert_true(execute_cli(["sm3", "abc", "extra"]) is Err(_))
+  assert_true(execute_cli(["keygen", "s"]) is Err(_))
+  assert_true(execute_cli(["keygen", "s", "id", "extra"]) is Err(_))
+  assert_true(execute_cli(["sign", "s", "id"]) is Err(_))
+  assert_true(execute_cli(["sign", "s", "id", "m", "extra"]) is Err(_))
+  assert_true(execute_cli(["keyex", "s", "a"]) is Err(_))
+  assert_true(execute_cli(["keyex", "s", "a", "b", "extra"]) is Err(_))
+  assert_true(execute_cli(["encrypt", "s", "id"]) is Err(_))
   assert_true(execute_cli(["encrypt", "s", "id", "m", "invalid"]) is Err(_))
+  assert_true(
+    execute_cli(["encrypt", "s", "id", "m", "sm4", "extra"]) is Err(_),
+  )
+}
+
+///|
+test "CLI sm3_domain_hash prevents field boundary ambiguity" {
+  let h1 = sm3_domain_hash(b"moonsm9:cli:keyex:A:v1", [b"ab", b"c", b"d"])
+  let h2 = sm3_domain_hash(b"moonsm9:cli:keyex:A:v1", [b"a", b"bc", b"d"])
+  assert_eq(h1.length(), 32)
+  assert_eq(h2.length(), 32)
+  assert_true(h1 != h2)
 }

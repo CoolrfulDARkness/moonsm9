@@ -294,15 +294,27 @@ test "End-to-end GB/T 38635.4 Appendix A.1/A.2/A.3: KGC + KEM + KdfXor + Sm4EcbP
     Err(e) => abort(e)
   }
   assert_eq(kem_decap, kem_out.key())
-  // Deterministic KEM round-trip
-  let det_kem = match
-    @moonsm9.kem_encapsulate(p_pub_e, id_b, 48, entropy=b"kem-seed-42") {
+  // Deterministic KEM round-trip (requires >= 32 bytes CSPRNG entropy)
+  let kem_entropy = @moonsm9.sm3_hash(b"kem-seed-42")
+  assert_eq(@moonsm9.MIN_ENTROPY_LEN, 32)
+  assert_eq(kem_entropy.length(), 32)
+  let det_kem = match @moonsm9.kem_encapsulate(p_pub_e, id_b, 48, kem_entropy) {
     Ok(v) => v
     Err(e) => abort(e)
   }
   assert_eq(
     @moonsm9.kem_decapsulate(id_b, de_b, det_kem.c1(), 48),
     Ok(det_kem.key()),
+  )
+  // Adversarial: empty and short (< 32B) entropy must be rejected by kem_encapsulate
+  assert_true(@moonsm9.kem_encapsulate(p_pub_e, id_b, 32, b"") is Err(_))
+  assert_true(
+    @moonsm9.kem_encapsulate(p_pub_e, id_b, 32, Bytes::make(16, b'\x42'))
+    is Err(_),
+  )
+  assert_true(
+    @moonsm9.kem_encapsulate(p_pub_e, id_b, 32, Bytes::make(31, b'\x42'))
+    is Err(_),
   )
   // Appendix A.2: KDF-XOR Encryption
   let r_a2 = must_fn(
@@ -355,8 +367,12 @@ test "End-to-end GB/T 38635.4 Appendix A.1/A.2/A.3: KGC + KEM + KdfXor + Sm4EcbP
   ]
   for i = 0; i < samples.length(); i = i + 1 {
     let pt = samples[i]
+    let xor_ent = Bytes::makei(32, fn(j) { ((i * 37 + j + 1) & 0xff).to_byte() })
+    let sm4_ent = Bytes::makei(32, fn(j) {
+      ((i * 53 + j + 0x80) & 0xff).to_byte()
+    })
     let c_xor = match
-      @moonsm9.encrypt(p_pub_e, id_b, pt, mode=@enc.EncMode::KdfXor) {
+      @moonsm9.encrypt(p_pub_e, id_b, pt, xor_ent, mode=@enc.EncMode::KdfXor) {
       Ok(c) => c
       Err(e) => abort(e)
     }
@@ -369,8 +385,8 @@ test "End-to-end GB/T 38635.4 Appendix A.1/A.2/A.3: KGC + KEM + KdfXor + Sm4EcbP
         p_pub_e,
         id_b,
         pt,
+        sm4_ent,
         mode=@enc.EncMode::Sm4EcbPkcs7,
-        entropy=b"sm4-entropy",
       ) {
       Ok(c) => c
       Err(e) => abort(e)
@@ -380,6 +396,45 @@ test "End-to-end GB/T 38635.4 Appendix A.1/A.2/A.3: KGC + KEM + KdfXor + Sm4EcbP
       Ok(pt),
     )
   }
+  // Adversarial: empty and short (< 32B) entropy must be rejected by encrypt in both modes
+  let short16 = Bytes::make(16, b'\x5a')
+  let short31 = Bytes::make(31, b'\x5a')
+  assert_true(
+    @moonsm9.encrypt(p_pub_e, id_b, msg, b"", mode=@enc.EncMode::KdfXor)
+    is Err(_),
+  )
+  assert_true(
+    @moonsm9.encrypt(p_pub_e, id_b, msg, short16, mode=@enc.EncMode::KdfXor)
+    is Err(_),
+  )
+  assert_true(
+    @moonsm9.encrypt(p_pub_e, id_b, msg, short31, mode=@enc.EncMode::KdfXor)
+    is Err(_),
+  )
+  assert_true(
+    @moonsm9.encrypt(p_pub_e, id_b, msg, b"", mode=@enc.EncMode::Sm4EcbPkcs7)
+    is Err(_),
+  )
+  assert_true(
+    @moonsm9.encrypt(
+      p_pub_e,
+      id_b,
+      msg,
+      short16,
+      mode=@enc.EncMode::Sm4EcbPkcs7,
+    )
+    is Err(_),
+  )
+  assert_true(
+    @moonsm9.encrypt(
+      p_pub_e,
+      id_b,
+      msg,
+      short31,
+      mode=@enc.EncMode::Sm4EcbPkcs7,
+    )
+    is Err(_),
+  )
 }
 
 ///|
@@ -713,7 +768,8 @@ test "Adversarial malformed curve points: off-curve, >=p, infinity, bad prefix, 
   assert_true(@enc.kem_decapsulate(b"Bob", g2_inf, p1, 32) is Err(_))
   assert_true(@enc.encrypt_with_r(g1_inf, b"Bob", b"msg", r_one) is Err(_))
   // Ciphertext embedding malformed C1 (off-curve, >=p, all-zero) rejected by decrypt
-  let valid_ct = match @moonsm9.encrypt(p_pub_e, b"Bob", b"msg") {
+  let adv_ent = @moonsm9.sm3_hash(b"adv-bad-c1-entropy")
+  let valid_ct = match @moonsm9.encrypt(p_pub_e, b"Bob", b"msg", adv_ent) {
     Ok(c) => c
     Err(e) => abort(e)
   }
@@ -904,7 +960,10 @@ test "Adversarial forgery & tampering: signatures, key exchange confirmations, a
   ]
   for m_idx = 0; m_idx < modes.length(); m_idx = m_idx + 1 {
     let mode = modes[m_idx]
-    let ct = match @moonsm9.encrypt(p_pub_e, b"Bob", secret, mode~) {
+    let ent = Bytes::makei(32, fn(j) {
+      ((m_idx * 71 + j + 0x11) & 0xff).to_byte()
+    })
+    let ct = match @moonsm9.encrypt(p_pub_e, b"Bob", secret, ent, mode~) {
       Ok(c) => c
       Err(e) => abort(e)
     }
@@ -931,59 +990,97 @@ test "Adversarial forgery & tampering: signatures, key exchange confirmations, a
         ct[i]
       }
     })
-    assert_true(@moonsm9.decrypt(b"Bob", de_b_enc, ct_alt_c1, mode~) is Err(_))
-    // 3c. Flip 1 bit in C3 (MAC tag at bytes 64..96)
-    assert_true(
-      @moonsm9.decrypt(b"Bob", de_b_enc, flip_bit(ct, 64, b'\x01'), mode~)
-      is Err(_),
+    assert_eq(
+      @moonsm9.decrypt(b"Bob", de_b_enc, ct_alt_c1, mode~),
+      Err("decryption failed"),
     )
-    assert_true(
-      @moonsm9.decrypt(b"Bob", de_b_enc, flip_bit(ct, 95, b'\x80'), mode~)
-      is Err(_),
+    // 3c. Flip 1 bit in C3 (MAC tag at bytes 64..96)
+    assert_eq(
+      @moonsm9.decrypt(b"Bob", de_b_enc, flip_bit(ct, 64, b'\x01'), mode~),
+      Err("decryption failed"),
+    )
+    assert_eq(
+      @moonsm9.decrypt(b"Bob", de_b_enc, flip_bit(ct, 95, b'\x80'), mode~),
+      Err("decryption failed"),
     )
     // 3d. Flip 1 bit in C2 (ciphertext body at bytes 96..)
-    assert_true(
-      @moonsm9.decrypt(b"Bob", de_b_enc, flip_bit(ct, 96, b'\x01'), mode~)
-      is Err(_),
+    assert_eq(
+      @moonsm9.decrypt(b"Bob", de_b_enc, flip_bit(ct, 96, b'\x01'), mode~),
+      Err("decryption failed"),
     )
-    assert_true(
+    assert_eq(
       @moonsm9.decrypt(
         b"Bob",
         de_b_enc,
         flip_bit(ct, ct.length() - 1, b'\x01'),
         mode~,
-      )
-      is Err(_),
+      ),
+      Err("decryption failed"),
     )
-    // 3e. Truncated ciphertexts
+    // 3e. Truncated ciphertexts & 97-byte IND-CCA2 probe packet
     assert_true(@moonsm9.decrypt(b"Bob", de_b_enc, b"", mode~) is Err(_))
     assert_true(@moonsm9.decrypt(b"Bob", de_b_enc, ct[0:63], mode~) is Err(_))
     assert_true(@moonsm9.decrypt(b"Bob", de_b_enc, ct[0:95], mode~) is Err(_))
-    assert_true(
-      @moonsm9.decrypt(b"Bob", de_b_enc, ct[0:ct.length() - 1], mode~) is Err(_),
+    assert_eq(
+      @moonsm9.decrypt(b"Bob", de_b_enc, ct[0:ct.length() - 1], mode~),
+      Err("decryption failed"),
+    )
+    let probe_97 = Bytes::makei(97, fn(i) {
+      if i < 64 {
+        ct[i]
+      } else if i < 96 {
+        b'\x00'
+      } else {
+        b'\xaa'
+      }
+    })
+    assert_eq(
+      @moonsm9.decrypt(b"Bob", de_b_enc, probe_97, mode~),
+      Err("decryption failed"),
     )
     // 3f. Wrong recipient ID or wrong user private key
-    assert_true(@moonsm9.decrypt(b"Alice", de_b_enc, ct, mode~) is Err(_))
-    assert_true(@moonsm9.decrypt(b"Bob", de_a_enc, ct, mode~) is Err(_))
-    assert_true(@moonsm9.decrypt(b"Alice", de_a_enc, ct, mode~) is Err(_))
+    assert_eq(
+      @moonsm9.decrypt(b"Alice", de_b_enc, ct, mode~),
+      Err("decryption failed"),
+    )
+    assert_eq(
+      @moonsm9.decrypt(b"Bob", de_a_enc, ct, mode~),
+      Err("decryption failed"),
+    )
+    assert_eq(
+      @moonsm9.decrypt(b"Alice", de_a_enc, ct, mode~),
+      Err("decryption failed"),
+    )
   }
-  // Cross-mode decryption strictly rejected
+  // Cross-mode decryption strictly rejected with uniform error
   let ct_xor = match
-    @moonsm9.encrypt(p_pub_e, b"Bob", secret, mode=@enc.EncMode::KdfXor) {
+    @moonsm9.encrypt(
+      p_pub_e,
+      b"Bob",
+      secret,
+      @moonsm9.sm3_hash(b"cross-mode-xor"),
+      mode=@enc.EncMode::KdfXor,
+    ) {
     Ok(c) => c
     Err(e) => abort(e)
   }
   let ct_sm4 = match
-    @moonsm9.encrypt(p_pub_e, b"Bob", secret, mode=@enc.EncMode::Sm4EcbPkcs7) {
+    @moonsm9.encrypt(
+      p_pub_e,
+      b"Bob",
+      secret,
+      @moonsm9.sm3_hash(b"cross-mode-sm4"),
+      mode=@enc.EncMode::Sm4EcbPkcs7,
+    ) {
     Ok(c) => c
     Err(e) => abort(e)
   }
-  assert_true(
-    @moonsm9.decrypt(b"Bob", de_b_enc, ct_xor, mode=@enc.EncMode::Sm4EcbPkcs7)
-    is Err(_),
+  assert_eq(
+    @moonsm9.decrypt(b"Bob", de_b_enc, ct_xor, mode=@enc.EncMode::Sm4EcbPkcs7),
+    Err("decryption failed"),
   )
-  assert_true(
-    @moonsm9.decrypt(b"Bob", de_b_enc, ct_sm4, mode=@enc.EncMode::KdfXor)
-    is Err(_),
+  assert_eq(
+    @moonsm9.decrypt(b"Bob", de_b_enc, ct_sm4, mode=@enc.EncMode::KdfXor),
+    Err("decryption failed"),
   )
 }

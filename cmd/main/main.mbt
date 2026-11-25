@@ -35,21 +35,27 @@ fn parse_fp(hex : String) -> Result[@field.Fp, String] {
 }
 
 ///|
-fn concat_bytes(parts : Array[Bytes]) -> Bytes {
-  let mut total = 0
-  for i = 0; i < parts.length(); i = i + 1 {
-    total = total + parts[i].length()
+fn sm3_update_be_u32(h : @sm3.Sm3, v : UInt32) -> Unit {
+  h.update_byte((v >> 24).to_byte())
+  h.update_byte((v >> 16).to_byte())
+  h.update_byte((v >> 8).to_byte())
+  h.update_byte(v.to_byte())
+}
+
+///|
+/// Computes a 32-byte SM3 digest with explicit length-prefixed domain separation
+/// across `domain` and every field in `fields`.
+fn sm3_domain_hash(domain : BytesView, fields : Array[BytesView]) -> Bytes {
+  let h = @sm3.Sm3::new()
+  sm3_update_be_u32(h, domain.length().reinterpret_as_uint())
+  h.update(domain)
+  sm3_update_be_u32(h, fields.length().reinterpret_as_uint())
+  for i = 0; i < fields.length(); i = i + 1 {
+    let f = fields[i]
+    sm3_update_be_u32(h, f.length().reinterpret_as_uint())
+    h.update(f)
   }
-  let buf = FixedArray::make(total, b'\x00')
-  let mut offset = 0
-  for i = 0; i < parts.length(); i = i + 1 {
-    let p = parts[i]
-    for j = 0; j < p.length(); j = j + 1 {
-      buf[offset] = p[j]
-      offset = offset + 1
-    }
-  }
-  Bytes::from_array(buf)
+  h.finalize()
 }
 
 ///|
@@ -365,8 +371,8 @@ fn suite3_key_exchange() -> Result[Array[String], String] {
     Err(e) => return Err(e)
     Ok(_) => ()
   }
-  if !@keyex.verify_responder_confirmation(res_a.s_1, res_b.s_b) ||
-    !@sm3.ct_eq_bytes(res_a.s_a, res_b.s_2) {
+  if !@sm3.ct_eq_bytes(res_a.s_1, res_b.s_b) ||
+    !@keyex.verify_responder_confirmation(res_b.s_2, res_a.s_a) {
     return Err("Key exchange mutual confirmation check failed")
   }
   lines.push(
@@ -634,12 +640,18 @@ fn suite6_adversarial() -> Result[Array[String], String] {
     Ok(k) => k.to_g2()
     Err(e) => return Err(e)
   }
+  let xor_entropy = sm3_domain_hash(b"moonsm9:selftest:adv:xor:v1", [
+    b"Bob", b"secret payload",
+  ])
+  let sm4_entropy = sm3_domain_hash(b"moonsm9:selftest:adv:sm4:v1", [
+    b"Bob", b"secret payload",
+  ])
   let ct_xor = match
     @enc.encrypt_deterministic(
       p_pub_e,
       b"Bob",
       b"secret payload",
-      b"enc-nonce-xor",
+      xor_entropy,
       mode=@enc.KdfXor,
     ) {
     Ok(c) => c
@@ -650,7 +662,7 @@ fn suite6_adversarial() -> Result[Array[String], String] {
       p_pub_e,
       b"Bob",
       b"secret payload",
-      b"enc-nonce-sm4",
+      sm4_entropy,
       mode=@enc.Sm4EcbPkcs7,
     ) {
     Ok(c) => c
@@ -793,9 +805,9 @@ fn run_sign_cmd(
     Ok(k) => k
     Err(e) => return Err("extract_sign_private_key failed: " + e)
   }
-  let entropy = @sm3.hash(
-    concat_bytes([b"moonsm9:cli:sign:", seed_bytes, b":", id_bytes]),
-  )
+  let entropy = sm3_domain_hash(b"moonsm9:cli:sign:v1", [
+    seed_bytes, id_bytes, msg_bytes,
+  ])
   let sig = match
     @sign.sign_deterministic(mpk.to_g2(), ds_user.to_g1(), msg_bytes, entropy) {
     Ok(s) => s
@@ -837,11 +849,15 @@ fn run_keyex_cmd(
   }
   // Deterministically derive non-zero ephemeral scalars r_A, r_B in [1, N-1]
   let r_a = @kgc.h1_scalar(
-    concat_bytes([b"moonsm9:cli:keyex:A:", seed_bytes, id_a_bytes, id_b_bytes]),
+    sm3_domain_hash(b"moonsm9:cli:keyex:A:v1", [
+      seed_bytes, id_a_bytes, id_b_bytes,
+    ]),
     @kgc.HID_KEYEX,
   )
   let r_b = @kgc.h1_scalar(
-    concat_bytes([b"moonsm9:cli:keyex:B:", seed_bytes, id_a_bytes, id_b_bytes]),
+    sm3_domain_hash(b"moonsm9:cli:keyex:B:v1", [
+      seed_bytes, id_a_bytes, id_b_bytes,
+    ]),
     @kgc.HID_KEYEX,
   )
   let r_a_pt = match @keyex.generate_ephemeral(p_pub_e, id_b_bytes, r_a) {
@@ -875,8 +891,8 @@ fn run_keyex_cmd(
     Err(e) => return Err("initiator_exchange failed: " + e)
   }
   if !@sm3.ct_eq_bytes(res_a.sk, res_b.sk) ||
-    !@keyex.verify_responder_confirmation(res_a.s_1, res_b.s_b) ||
-    !@sm3.ct_eq_bytes(res_a.s_a, res_b.s_2) {
+    !@sm3.ct_eq_bytes(res_a.s_1, res_b.s_b) ||
+    !@keyex.verify_responder_confirmation(res_b.s_2, res_a.s_a) {
     return Err("key exchange confirmation or shared key mismatch")
   }
   Ok([
@@ -915,9 +931,13 @@ fn run_encrypt_cmd(
     Ok(k) => k.to_g2()
     Err(e) => return Err("extract_enc_private_key failed: " + e)
   }
-  let entropy = @sm3.hash(
-    concat_bytes([b"moonsm9:cli:enc:", seed_bytes, b":", id_bytes]),
-  )
+  let mode_tag : Bytes = match mode {
+    @enc.KdfXor => b"xor"
+    @enc.Sm4EcbPkcs7 => b"sm4"
+  }
+  let entropy = sm3_domain_hash(b"moonsm9:cli:enc:v1", [
+    seed_bytes, id_bytes, msg_bytes, mode_tag,
+  ])
   let ct = match
     @enc.encrypt_deterministic(mpk.to_g1(), id_bytes, msg_bytes, entropy, mode~) {
     Ok(c) => c
@@ -971,11 +991,57 @@ fn is_known_subcommand(arg : String) -> Bool {
 }
 
 ///|
-fn is_runtime_script_arg(arg : String) -> Bool {
-  arg.has_suffix(".js") ||
-  arg.has_suffix(".mjs") ||
-  arg.has_suffix(".cjs") ||
-  arg.has_suffix(".wasm")
+fn ascii_to_lower(s : String) -> String {
+  let buf = StringBuilder()
+  for c in s {
+    let code = c.to_int()
+    if code >= 65 && code <= 90 {
+      match (code + 32).to_char() {
+        Some(lc) => buf.write_char(lc)
+        None => buf.write_char(c)
+      }
+    } else {
+      buf.write_char(c)
+    }
+  }
+  buf.to_string()
+}
+
+///|
+fn path_basename_lower(path : String) -> String {
+  let mut seg = StringBuilder()
+  for c in path {
+    if c == '/' || c == '\\' {
+      seg = StringBuilder()
+    } else {
+      let code = c.to_int()
+      if code >= 65 && code <= 90 {
+        match (code + 32).to_char() {
+          Some(lc) => seg.write_char(lc)
+          None => seg.write_char(c)
+        }
+      } else {
+        seg.write_char(c)
+      }
+    }
+  }
+  seg.to_string()
+}
+
+///|
+fn is_js_runtime_executable(argv0 : String) -> Bool {
+  match path_basename_lower(argv0) {
+    "node" | "node.exe" | "deno" | "deno.exe" | "bun" | "bun.exe" => true
+    _ => false
+  }
+}
+
+///|
+fn is_js_script_arg(arg : String) -> Bool {
+  let lower = ascii_to_lower(arg)
+  lower.has_suffix(".js") ||
+  lower.has_suffix(".mjs") ||
+  lower.has_suffix(".cjs")
 }
 
 ///|
@@ -988,11 +1054,12 @@ fn extract_subcommand_args(raw_args : Array[String]) -> Array[String] {
   if is_known_subcommand(raw_args[0]) {
     return raw_args
   }
-  // Drop argv[0] (executable path); on Node.js (--target js), also drop argv[1] (script .js path).
+  // Drop argv[0] (executable path). Only drop argv[1] when argv[0] is a JS runtime
+  // (node/deno/bun) and argv[1] is a .js/.mjs/.cjs script entrypoint.
   let mut start = 1
   if start < n &&
-    !is_known_subcommand(raw_args[start]) &&
-    is_runtime_script_arg(raw_args[start]) {
+    is_js_runtime_executable(raw_args[0]) &&
+    is_js_script_arg(raw_args[start]) {
     start = 2
   }
   let out : Array[String] = []
@@ -1008,37 +1075,47 @@ fn execute_cli(args : Array[String]) -> Result[Array[String], String] {
     return run_selftest()
   }
   match args[0] {
-    "selftest" => run_selftest()
-    "help" | "--help" | "-h" => Ok(usage_lines())
+    "selftest" =>
+      if args.length() != 1 {
+        Err("Usage: selftest")
+      } else {
+        run_selftest()
+      }
+    "help" | "--help" | "-h" =>
+      if args.length() != 1 {
+        Err("Usage: help | --help | -h")
+      } else {
+        Ok(usage_lines())
+      }
     "sm3" =>
-      if args.length() < 2 {
+      if args.length() != 2 {
         Err("Usage: sm3 <text>")
       } else {
         run_sm3_cmd(args[1])
       }
     "keygen" =>
-      if args.length() < 3 {
+      if args.length() != 3 {
         Err("Usage: keygen <seed> <id>")
       } else {
         run_keygen_cmd(args[1], args[2])
       }
     "sign" =>
-      if args.length() < 4 {
+      if args.length() != 4 {
         Err("Usage: sign <seed> <id> <message>")
       } else {
         run_sign_cmd(args[1], args[2], args[3])
       }
     "keyex" =>
-      if args.length() < 4 {
+      if args.length() != 4 {
         Err("Usage: keyex <seed> <id_a> <id_b>")
       } else {
         run_keyex_cmd(args[1], args[2], args[3])
       }
     "encrypt" =>
-      if args.length() < 4 {
+      if args.length() != 4 && args.length() != 5 {
         Err("Usage: encrypt <seed> <id> <message> [xor|sm4]")
       } else {
-        let mode_name = if args.length() >= 5 { args[4] } else { "xor" }
+        let mode_name = if args.length() == 5 { args[4] } else { "xor" }
         run_encrypt_cmd(args[1], args[2], args[3], mode_name)
       }
     other =>

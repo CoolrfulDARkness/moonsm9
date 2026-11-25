@@ -17,6 +17,8 @@ pub const HID_KEYEX : Byte = b'\x02'
 
 pub const HID_SIGN : Byte = b'\x01'
 
+pub const MIN_ENTROPY_LEN : Int32 = 32
+
 pub fn bytes_to_hex(BytesView) -> String
 
 pub fn ct_eq_bytes(BytesView, BytesView) -> Bool
@@ -27,7 +29,7 @@ pub fn enc_master_from_bytes(BytesView) -> @kgc.EncMasterPrivateKey?
 
 pub fn enc_master_from_seed(BytesView) -> @kgc.EncMasterPrivateKey
 
-pub fn encrypt(@kgc.EncMasterPublicKey, BytesView, BytesView, mode? : @enc.EncMode, entropy? : BytesView, hid? : Byte) -> Result[Bytes, String]
+pub fn encrypt(@kgc.EncMasterPublicKey, BytesView, BytesView, BytesView, mode? : @enc.EncMode, hid? : Byte) -> Result[Bytes, String]
 
 pub fn encrypt_with_r(@kgc.EncMasterPublicKey, BytesView, BytesView, @field.Fn, mode? : @enc.EncMode, hid? : Byte) -> Result[Bytes, String]
 
@@ -43,7 +45,7 @@ pub fn kdf(BytesView, Int32) -> Bytes
 
 pub fn kem_decapsulate(BytesView, @kgc.EncUserPrivateKey, @ec.G1Affine, Int32) -> Result[Bytes, String]
 
-pub fn kem_encapsulate(@kgc.EncMasterPublicKey, BytesView, Int32, entropy? : BytesView, hid? : Byte) -> Result[@enc.KemOutput, String]
+pub fn kem_encapsulate(@kgc.EncMasterPublicKey, BytesView, Int32, BytesView, hid? : Byte) -> Result[@enc.KemOutput, String]
 
 pub fn kem_encapsulate_with_r(@kgc.EncMasterPublicKey, BytesView, Int32, @field.Fn, hid? : Byte) -> Result[@enc.KemOutput, String]
 

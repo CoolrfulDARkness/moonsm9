@@ -11,6 +11,10 @@ pub const HID_KEYEX : Byte = @kgc.HID_KEYEX
 pub const HID_ENC : Byte = @kgc.HID_ENC
 
 ///|
+/// Minimum required CSPRNG entropy length (32 bytes / 256 bits) for `kem_encapsulate` and `encrypt`.
+pub const MIN_ENTROPY_LEN : Int32 = @enc.MIN_ENTROPY_LEN
+
+///|
 /// Computes the 32-byte SM3 cryptographic hash digest (GB/T 32905-2016).
 pub fn sm3_hash(data : BytesView) -> Bytes {
   @sm3.hash(data)
@@ -265,12 +269,15 @@ pub fn keyex_verify_confirmation(
 }
 
 ///|
-/// Deterministically encapsulates a `klen`-byte shared key for identity `id_b` (GB/T 38635.4 KEM).
+/// Encapsulates a `klen`-byte shared key for identity `id_b` (GB/T 38635.4 KEM).
+///
+/// Security: `entropy` is required and MUST come from a CSPRNG with at least
+/// `MIN_ENTROPY_LEN` (32) bytes. Shorter entropy is rejected with `Err`.
 pub fn kem_encapsulate(
   p_pub_e : @kgc.EncMasterPublicKey,
   id_b : BytesView,
   klen : Int32,
-  entropy~ : BytesView = b"",
+  entropy : BytesView,
   hid~ : Byte = HID_ENC,
 ) -> Result[@enc.KemOutput, String] {
   @enc.kem_encapsulate_deterministic(p_pub_e.to_g1(), id_b, klen, entropy, hid~)
@@ -302,15 +309,18 @@ pub fn kem_decapsulate(
 }
 
 ///|
-/// Deterministically encrypts `plaintext` for identity `id_b`, producing raw `C1 || C3 || C2`
-/// ciphertext in either `@enc.EncMode::KdfXor` (default) or `@enc.EncMode::Sm4EcbPkcs7` mode
+/// Encrypts `plaintext` for identity `id_b`, producing raw `C1 || C3 || C2` ciphertext
+/// in either `@enc.EncMode::KdfXor` (default) or `@enc.EncMode::Sm4EcbPkcs7` mode
 /// (GB/T 38635.4).
+///
+/// Security: `entropy` is required and MUST come from a CSPRNG with at least
+/// `MIN_ENTROPY_LEN` (32) bytes. Shorter entropy is rejected with `Err`.
 pub fn encrypt(
   p_pub_e : @kgc.EncMasterPublicKey,
   id_b : BytesView,
   plaintext : BytesView,
+  entropy : BytesView,
   mode~ : @enc.EncMode = @enc.EncMode::KdfXor,
-  entropy~ : BytesView = b"",
   hid~ : Byte = HID_ENC,
 ) -> Result[Bytes, String] {
   @enc.encrypt_deterministic(
@@ -339,7 +349,9 @@ pub fn encrypt_with_r(
 
 ///|
 /// Decrypts a raw `C1 || C3 || C2` ciphertext for identity `id_b` using `de_b` (GB/T 38635.4).
-/// Validates `C1`, `de_b`, and constant-time MAC `C3 = SM3(C2 || K2)` before decrypting `C2`.
+/// Validates `C1`, `de_b`, and constant-time MAC `C3 = SM3(C2 || K2)` and `K1 != 0` before
+/// decrypting `C2`, returning a uniform `Err("decryption failed")` for ciphertext/MAC/padding
+/// failures to prevent IND-CCA2 and padding oracles.
 pub fn decrypt(
   id_b : BytesView,
   de_b : @kgc.EncUserPrivateKey,

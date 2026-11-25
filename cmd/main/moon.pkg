@@ -1,5 +1,14 @@
-// import {
-//   "CoolrfulDARkness/moonsm9" @lib,
-// }
+import {
+  "CoolrfulDARkness/moonsm9/sm3",
+  "CoolrfulDARkness/moonsm9/field",
+  "CoolrfulDARkness/moonsm9/ec",
+  "CoolrfulDARkness/moonsm9/pairing",
+  "CoolrfulDARkness/moonsm9/kgc",
+  "CoolrfulDARkness/moonsm9/sign",
+  "CoolrfulDARkness/moonsm9/keyex",
+  "CoolrfulDARkness/moonsm9/enc",
+  "moonbitlang/core/env",
+  "moonbitlang/core/encoding/utf8",
+}
 
 pkgtype(kind: "executable")

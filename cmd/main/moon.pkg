@@ -1,0 +1,5 @@
+// import {
+//   "CoolrfulDARkness/moonsm9" @lib,
+// }
+
+pkgtype(kind: "executable")

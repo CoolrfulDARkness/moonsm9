@@ -276,7 +276,7 @@ pub fn Sm3::update(self : Sm3, data : BytesView) -> Unit {
     self.buf_len = 0
     off = need
   }
-  while off + 64 <= len {
+  while len - off >= 64 {
     compress_block_view(self.state, data, off)
     off = off + 64
   }

@@ -585,3 +585,51 @@ test "Carry-overflow > 2^256 boundary tests for Fp, Fn, and Fp2::triple" {
     ).is_one(),
   )
 }
+
+///|
+test "Fp::is_zero_mask, Fp2::is_zero_mask, and Fp12::is_in_cyclotomic_subgroup" {
+  let all_ones = 0xFFFF_FFFF_FFFF_FFFFUL
+  let zero = @field.Fp::zero()
+  let one = @field.Fp::one()
+  let p_minus_1 = zero.sub(one)
+  // Fp::is_zero_mask
+  assert_eq(zero.is_zero_mask(), all_ones)
+  assert_eq(one.is_zero_mask(), 0UL)
+  assert_eq(p_minus_1.is_zero_mask(), 0UL)
+  // Fp2::is_zero_mask
+  assert_eq(@field.Fp2::zero().is_zero_mask(), all_ones)
+  assert_eq(@field.Fp2::new(zero, one).is_zero_mask(), 0UL)
+  assert_eq(@field.Fp2::new(one, zero).is_zero_mask(), 0UL)
+  assert_eq(@field.Fp2::new(p_minus_1, one).is_zero_mask(), 0UL)
+  // Fp12::is_in_cyclotomic_subgroup: positive cases (1 and official e(P2, P1))
+  assert_true(@field.Fp12::one().is_in_cyclotomic_subgroup())
+  let e_hex = b"256943fbdb2bf87ab91ae7fbeaff14e146cf7e2279b9d155d13461e09b22f5230167b0280051495c6af1ec23ba2cd2ff1cdcdeca461a5ab0b5449e90913083105e7addaddf7fbfe16291b4e89af50b8217ddc47ba3cba833c6e77c3fb027685e79d0c8337072c93fef482bb055f44d6247ccac8e8e12525854b3566236337ebe082cde173022da8cd09b28a2d80a8cee53894436a52007f978dc37f36116d39b3fa7ed741eaed99a58f53e3df82df7ccd3407bcc7b1d44a9441920ced5fb824f7fc6eb2aa771d99c9234fddd31752edfd60723e05a4ebfdeb5c33fbd47e0cf066fa6b6fa6dd6b6d3b19a959a110e748154eef796dc0fc2dd766ea414de7869688ffe1c0e9de45fd0fed790ac26be91f6b3f0a49c084fe29a3fb6ed288ad7994d1664a1366beb3196f0443e15f5f9042a947354a5678430d45ba031cff06db9277f7c6d52b475e6aaa827fdc5b4175ac6929320f782d998f86b6b57cda42a042636a699de7c136f78eee2dbac4ca9727bff0cee02ee920f5822e65ea170aa9669"
+  let e_val = match @field.Fp12::from_bytes_strict(hex_to_bytes(e_hex)) {
+    Some(x) => x
+    None => abort("valid e(P2, P1) must decode")
+  }
+  assert_true(e_val.is_in_cyclotomic_subgroup())
+  // Negative cases: 0, -1 (which satisfies conjugate * x == 1 but NOT x^{p^4-p^2+1} == 1),
+  // and a general non-cyclotomic Fp12 element
+  assert_true(!@field.Fp12::zero().is_in_cyclotomic_subgroup())
+  assert_true(!@field.Fp12::one().neg().is_in_cyclotomic_subgroup())
+  let general = @field.Fp12::new(
+    @field.Fp6::new(
+      @field.Fp2::new(@field.Fp::from_u64(2UL), @field.Fp::from_u64(3UL)),
+      @field.Fp2::new(@field.Fp::from_u64(5UL), @field.Fp::from_u64(7UL)),
+      @field.Fp2::new(@field.Fp::from_u64(11UL), @field.Fp::from_u64(13UL)),
+    ),
+    @field.Fp6::new(
+      @field.Fp2::new(@field.Fp::from_u64(17UL), @field.Fp::from_u64(19UL)),
+      @field.Fp2::new(@field.Fp::from_u64(23UL), @field.Fp::from_u64(29UL)),
+      @field.Fp2::new(@field.Fp::from_u64(31UL), @field.Fp::from_u64(37UL)),
+    ),
+  )
+  assert_true(!general.is_in_cyclotomic_subgroup())
+  // Projection (general^{p^6 - 1})^{p^2 + 1} enters G_{Phi_6}(Fp2), while general^{p^6 - 1} alone does not
+  let f_norm1 = general.conjugate().mul(general.inv())
+  assert_true(f_norm1.conjugate().mul(f_norm1).is_one())
+  assert_true(!f_norm1.is_in_cyclotomic_subgroup())
+  let f_cyclo = f_norm1.frobenius_p2().mul(f_norm1)
+  assert_true(f_cyclo.is_in_cyclotomic_subgroup())
+}

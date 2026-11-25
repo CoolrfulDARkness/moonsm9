@@ -1,10 +1,4 @@
 ///|
-/// Constant-time zero mask for `Fp2` (no short-circuit `&&`).
-fn fp2_is_zero_mask(a : @field.Fp2) -> UInt64 {
-  @field.ct_mask(a.c0.is_zero()) & @field.ct_mask(a.c1.is_zero())
-}
-
-///|
 /// Affine point on BN256 sextic D-type twist `E'(Fp2): y^2 = x^3 + 5u`.
 /// Private fields protect the curve and prime-order subgroup `G2` invariants;
 /// infinity is canonically `(0, 0, true)`.
@@ -258,7 +252,7 @@ pub fn G2Jac::generator() -> G2Jac {
 
 ///|
 pub fn G2Jac::is_identity(self : G2Jac) -> Bool {
-  fp2_is_zero_mask(self.z) != 0UL
+  self.z.is_zero()
 }
 
 ///|
@@ -274,8 +268,8 @@ pub fn G2Jac::ct_select(a : G2Jac, b : G2Jac, choice : UInt64) -> G2Jac {
 ///|
 /// Constant-time projective equality on `G2Jac`.
 pub fn G2Jac::ct_eq(self : G2Jac, other : G2Jac) -> Bool {
-  let z1_zero = fp2_is_zero_mask(self.z)
-  let z2_zero = fp2_is_zero_mask(other.z)
+  let z1_zero = self.z.is_zero_mask()
+  let z2_zero = other.z.is_zero_mask()
   let both_inf = z1_zero & z2_zero
   let neither_inf = (z1_zero ^ ec_all_ones) & (z2_zero ^ ec_all_ones)
   let z1z1 = self.z.sqr()
@@ -297,7 +291,7 @@ pub fn G2Jac::neg(self : G2Jac) -> G2Jac {
 ///|
 /// Constant-time conversion from Jacobian to affine coordinates.
 pub fn G2Jac::to_affine(self : G2Jac) -> G2Affine {
-  let inf_mask = fp2_is_zero_mask(self.z)
+  let inf_mask = self.z.is_zero_mask()
   let z_inv = self.z.inv()
   let z_inv2 = z_inv.sqr()
   let z_inv3 = z_inv2.mul(z_inv)
@@ -347,10 +341,10 @@ pub fn G2Jac::add(self : G2Jac, other : G2Jac) -> G2Jac {
   let y3 = r.mul(v.sub(x3)).sub(s1.mul(j).double())
   let z3 = self.z.add(other.z).sqr().sub(z1z1).sub(z2z2).mul(h)
   let add_res : G2Jac = { x: x3, y: y3, z: z3, }
-  let self_inf = fp2_is_zero_mask(self.z)
-  let other_inf = fp2_is_zero_mask(other.z)
-  let h_zero = fp2_is_zero_mask(h)
-  let r_zero = fp2_is_zero_mask(s_diff)
+  let self_inf = self.z.is_zero_mask()
+  let other_inf = other.z.is_zero_mask()
+  let h_zero = h.is_zero_mask()
+  let r_zero = s_diff.is_zero_mask()
   let is_opposite = h_zero & (r_zero ^ ec_all_ones)
   let is_double = h_zero & r_zero
   let dbl = self.double()
@@ -378,10 +372,10 @@ pub fn G2Jac::add_mixed(self : G2Jac, other : G2Affine) -> G2Jac {
   let y3 = r.mul(v.sub(x3)).sub(self.y.mul(j).double())
   let z3 = self.z.add(h).sqr().sub(z1z1).sub(hh)
   let add_res : G2Jac = { x: x3, y: y3, z: z3, }
-  let self_inf = fp2_is_zero_mask(self.z)
+  let self_inf = self.z.is_zero_mask()
   let other_inf = @field.ct_mask(other.infinity)
-  let h_zero = fp2_is_zero_mask(h)
-  let r_zero = fp2_is_zero_mask(s_diff)
+  let h_zero = h.is_zero_mask()
+  let r_zero = s_diff.is_zero_mask()
   let is_opposite = h_zero & (r_zero ^ ec_all_ones)
   let is_double = h_zero & r_zero
   let dbl = self.double()

@@ -90,6 +90,7 @@ pub fn Fp::inv(Self) -> Self
 pub fn Fp::inv_checked(Self) -> Self?
 pub fn Fp::is_one(Self) -> Bool
 pub fn Fp::is_zero(Self) -> Bool
+pub fn Fp::is_zero_mask(Self) -> UInt64
 pub fn Fp::mul(Self, Self) -> Self
 pub fn Fp::mul_by_5(Self) -> Self
 pub fn Fp::neg(Self) -> Self
@@ -121,6 +122,7 @@ pub fn Fp12::frobenius_p3(Self) -> Self
 pub fn Fp12::from_bytes_strict(BytesView) -> Self?
 pub fn Fp12::inv(Self) -> Self
 pub fn Fp12::inv_checked(Self) -> Self?
+pub fn Fp12::is_in_cyclotomic_subgroup(Self) -> Bool
 pub fn Fp12::is_one(Self) -> Bool
 pub fn Fp12::is_zero(Self) -> Bool
 pub fn Fp12::mul(Self, Self) -> Self
@@ -151,6 +153,7 @@ pub fn Fp2::inv(Self) -> Self
 pub fn Fp2::inv_checked(Self) -> Self?
 pub fn Fp2::is_one(Self) -> Bool
 pub fn Fp2::is_zero(Self) -> Bool
+pub fn Fp2::is_zero_mask(Self) -> UInt64
 pub fn Fp2::mul(Self, Self) -> Self
 pub fn Fp2::mul_by_5u(Self) -> Self
 pub fn Fp2::mul_by_u(Self) -> Self

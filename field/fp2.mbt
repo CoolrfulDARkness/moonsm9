@@ -33,8 +33,15 @@ pub fn Fp2::b_twist() -> Fp2 {
 }
 
 ///|
+/// Constant-time zero mask: returns `0xFFFF_FFFF_FFFF_FFFFUL` if `self == 0`, else `0UL`.
+/// Implemented purely via bitwise operations without converting through `Bool` or `if`.
+pub fn Fp2::is_zero_mask(self : Fp2) -> UInt64 {
+  self.c0.is_zero_mask() & self.c1.is_zero_mask()
+}
+
+///|
 pub fn Fp2::is_zero(self : Fp2) -> Bool {
-  self.c0.is_zero() && self.c1.is_zero()
+  self.is_zero_mask() != 0UL
 }
 
 ///|

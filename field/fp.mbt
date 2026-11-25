@@ -298,9 +298,15 @@ fn Fp::write_be_bytes_into(
 }
 
 ///|
+/// Constant-time zero mask: returns `0xFFFF_FFFF_FFFF_FFFFUL` if `self == 0`, else `0UL`.
+/// Implemented purely via bitwise operations without converting through `Bool` or `if`.
+pub fn Fp::is_zero_mask(self : Fp) -> UInt64 {
+  ct_is_zero_u64(self.d0 | self.d1 | self.d2 | self.d3)
+}
+
+///|
 pub fn Fp::is_zero(self : Fp) -> Bool {
-  let acc = self.d0 | self.d1 | self.d2 | self.d3
-  ct_is_zero_u64(acc) != 0UL
+  self.is_zero_mask() != 0UL
 }
 
 ///|

@@ -155,6 +155,12 @@ fn is_g2_zero(qx : @field.Fp2, qy : @field.Fp2) -> Bool {
 ///|
 /// Computes the BN256 optimal R-ate Miller loop for `Q = (qx, qy) in G2` and `P = (px, py) in G1`
 /// using zero-inversion Jacobian line functions and the 66-bit `6t + 2` NAF.
+///
+/// # Security Preconditions
+/// Callers MUST ensure the input coordinates represent valid prime-order subgroup points
+/// `Q in G2 \ {O}` (on `E'(Fp2)` with `[N]Q == O`) and `P in G1 \ {O}` (on `E(Fp)`),
+/// or the explicit `(0, 0)` infinity sentinel. High-level callers should prefer typed
+/// `@kgc.pair` or `@moonsm9.pair` with validated `G2Affine` / `G1Affine` points.
 pub fn miller_loop(
   qx : @field.Fp2,
   qy : @field.Fp2,
@@ -311,6 +317,12 @@ pub fn final_exponentiation(f : @field.Fp12) -> @field.Fp12 {
 ///|
 /// Computes the BN256 optimal R-ate bilinear pairing `e(Q, P) in GT` from affine coordinates
 /// `Q = (qx, qy) in G2` and `P = (px, py) in G1`.
+///
+/// # Security Preconditions
+/// Callers MUST ensure the input coordinates represent valid prime-order subgroup points
+/// `Q in G2 \ {O}` (on `E'(Fp2)` with `[N]Q == O`) and `P in G1 \ {O}` (on `E(Fp)`),
+/// or the explicit `(0, 0)` infinity sentinel. High-level callers should prefer typed
+/// `@kgc.pair` or `@moonsm9.pair` with validated `G2Affine` / `G1Affine` points.
 pub fn pair_coords(
   qx : @field.Fp2,
   qy : @field.Fp2,
@@ -326,6 +338,12 @@ pub fn pair_coords(
 ///|
 /// Computes the pairing product `e(Q1, P1) * e(Q2, P2) in GT` using a joint Miller loop
 /// and a single shared final exponentiation.
+///
+/// # Security Preconditions
+/// Callers MUST ensure both input pairs represent valid prime-order subgroup points
+/// `Q1, Q2 in G2 \ {O}` (on `E'(Fp2)` with `[N]Q == O`) and `P1, P2 in G1 \ {O}` (on `E(Fp)`),
+/// or the explicit `(0, 0)` infinity sentinel. High-level callers should prefer typed
+/// `@kgc.pair` or `@moonsm9.pair` with validated `G2Affine` / `G1Affine` points.
 pub fn pair_product_coords(
   q1x : @field.Fp2,
   q1y : @field.Fp2,

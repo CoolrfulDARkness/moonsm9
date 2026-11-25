@@ -180,6 +180,18 @@ pub fn Fp12::frobenius_p3(self : Fp12) -> Fp12 {
 }
 
 ///|
+/// Checks whether `self` belongs to the cyclotomic subgroup `G_{Phi_6}(Fp2)`.
+/// Verifies `self != 0`, `self^{p^6} * self == 1`, and `self^{p^4 + 1} == self^{p^2}`
+/// (equivalently `self^{p^4 - p^2 + 1} == 1`).
+pub fn Fp12::is_in_cyclotomic_subgroup(self : Fp12) -> Bool {
+  if self.is_zero() || !self.conjugate().mul(self).is_one() {
+    return false
+  }
+  let fp2 = self.frobenius_p2()
+  fp2.frobenius_p2().mul(self).ct_eq(fp2)
+}
+
+///|
 /// Constant-time exponentiation `self^exp` for arbitrary 256-bit exponents.
 pub fn Fp12::pow_u256(self : Fp12, exp : U256) -> Fp12 {
   let mut res = Fp12::one()

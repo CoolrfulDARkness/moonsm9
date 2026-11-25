@@ -301,8 +301,8 @@ pub fn G1Jac::ct_select(a : G1Jac, b : G1Jac, choice : UInt64) -> G1Jac {
 ///|
 /// Constant-time projective equality on `G1Jac`.
 pub fn G1Jac::ct_eq(self : G1Jac, other : G1Jac) -> Bool {
-  let z1_zero = @field.ct_mask(self.z.is_zero())
-  let z2_zero = @field.ct_mask(other.z.is_zero())
+  let z1_zero = self.z.is_zero_mask()
+  let z2_zero = other.z.is_zero_mask()
   let both_inf = z1_zero & z2_zero
   let neither_inf = (z1_zero ^ ec_all_ones) & (z2_zero ^ ec_all_ones)
   let z1z1 = self.z.sqr()
@@ -324,7 +324,7 @@ pub fn G1Jac::neg(self : G1Jac) -> G1Jac {
 ///|
 /// Constant-time conversion from Jacobian to affine coordinates.
 pub fn G1Jac::to_affine(self : G1Jac) -> G1Affine {
-  let inf_mask = @field.ct_mask(self.z.is_zero())
+  let inf_mask = self.z.is_zero_mask()
   let z_inv = self.z.inv()
   let z_inv2 = z_inv.sqr()
   let z_inv3 = z_inv2.mul(z_inv)
@@ -374,10 +374,10 @@ pub fn G1Jac::add(self : G1Jac, other : G1Jac) -> G1Jac {
   let y3 = r.mul(v.sub(x3)).sub(s1.mul(j).double())
   let z3 = self.z.add(other.z).sqr().sub(z1z1).sub(z2z2).mul(h)
   let add_res : G1Jac = { x: x3, y: y3, z: z3, }
-  let self_inf = @field.ct_mask(self.z.is_zero())
-  let other_inf = @field.ct_mask(other.z.is_zero())
-  let h_zero = @field.ct_mask(h.is_zero())
-  let r_zero = @field.ct_mask(s_diff.is_zero())
+  let self_inf = self.z.is_zero_mask()
+  let other_inf = other.z.is_zero_mask()
+  let h_zero = h.is_zero_mask()
+  let r_zero = s_diff.is_zero_mask()
   let is_opposite = h_zero & (r_zero ^ ec_all_ones)
   let is_double = h_zero & r_zero
   let dbl = self.double()
@@ -405,10 +405,10 @@ pub fn G1Jac::add_mixed(self : G1Jac, other : G1Affine) -> G1Jac {
   let y3 = r.mul(v.sub(x3)).sub(self.y.mul(j).double())
   let z3 = self.z.add(h).sqr().sub(z1z1).sub(hh)
   let add_res : G1Jac = { x: x3, y: y3, z: z3, }
-  let self_inf = @field.ct_mask(self.z.is_zero())
+  let self_inf = self.z.is_zero_mask()
   let other_inf = @field.ct_mask(other.infinity)
-  let h_zero = @field.ct_mask(h.is_zero())
-  let r_zero = @field.ct_mask(s_diff.is_zero())
+  let h_zero = h.is_zero_mask()
+  let r_zero = s_diff.is_zero_mask()
   let is_opposite = h_zero & (r_zero ^ ec_all_ones)
   let is_double = h_zero & r_zero
   let dbl = self.double()

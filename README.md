@@ -1,5 +1,10 @@
 # CoolrfulDARkness/moonsm9
 
+> [!IMPORTANT]
+> **项目已架构整合至统一国密全栈仓库 [`CoolrfulDARkness/moontlcp`](https://github.com/CoolrfulDARkness/moontlcp)（`sm9/` 子包体系，commit `8bebbfe`）。**  
+> 本仓库现仅保留作历史归档，不再单独维护或单独参评；合并版本已彻底消除重复 SM3/SM4 实现，与 TLCP 1.1（GM/T 0024）统一复用底层 `crypto/sm3`、`crypto/sm4`、`crypto/ct` 恒定时间原语。  
+> **Consolidated into [`CoolrfulDARkness/moontlcp`](https://github.com/CoolrfulDARkness/moontlcp):** This repository is archived for historical reference. All GB/T 38635-2020 SM9 packages now live under `moontlcp/sm9` sharing the unified `crypto/sm3`, `crypto/sm4`, and `crypto/ct` core.
+
 **Pure MoonBit, zero-FFI, bit-identical multi-target SM9 Identity-Based Cryptographic Algorithms suite (`GB/T 38635-2020` / `GM/T 0044-2016`), with built-in SM3 (`GB/T 32905-2016`) and SM4 (`GB/T 32907-2016`).**
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
